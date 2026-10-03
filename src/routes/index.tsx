@@ -32,7 +32,7 @@ const ATTR_LABEL: Record<string, string> = {
 
 const TABS = [
   ["dashboard", "Übersicht"], ["scan", "Foto analysieren"], ["inventory", "Bestand"],
-  ["boxes", "Boxen"], ["compare", "Vergleich"], ["data", "Daten"],
+  ["boxes", "Boxen"], ["sort", "Sortieren"], ["compare", "Vergleich"], ["data", "Daten"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -83,6 +83,7 @@ function App() {
           {tab === "scan" && <Scan boxes={boxes} reload={reload} goBoxes={() => setTab("boxes")} />}
           {tab === "inventory" && <Inventory beads={beads} reload={reload} />}
           {tab === "boxes" && <Boxes boxes={boxes} beads={beads} reload={reload} />}
+          {tab === "sort" && <Sort beads={beads} boxes={boxes} reload={reload} />}
           {tab === "compare" && <Compare beads={beads} />}
           {tab === "data" && <Data beads={beads} exportJson={exportJson} reload={reload} />}
         </main>
