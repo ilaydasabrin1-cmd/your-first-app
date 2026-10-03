@@ -468,7 +468,6 @@ function Data({ beads, exportJson, reload }: { beads: Rec[]; exportJson: () => v
   );
 }
 
-const CORNER_NAMES = ["oben links", "oben rechts", "unten rechts", "unten links"];
 function gridLines(c: Pt[], rows: number, cols: number) {
   const R = Math.max(1, Math.min(16, rows || 1)), C = Math.max(1, Math.min(16, cols || 1));
   const [tl, tr, br, bl] = c as [Pt, Pt, Pt, Pt];
