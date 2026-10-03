@@ -540,6 +540,13 @@ function Data({ beads, exportJson, reload }: { beads: Rec[]; exportJson: () => v
         <button className="pm-btn" onClick={exportCsv}>CSV exportieren</button>
         <label className="pm-btn">JSON wiederherstellen<input type="file" accept="application/json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) importJson(f); e.target.value = ""; }} /></label>
         <button className="pm-btn text-destructive" onClick={async () => {
+          if (beads.length === 0) { alert("Der Bestand ist bereits leer."); return; }
+          if (!confirm(`Wirklich alle ${beads.length} Perlen löschen? Boxen bleiben erhalten. Diese Aktion kann nur mit einem Backup rückgängig gemacht werden.`)) return;
+          await clearStore("beads");
+          await clearStore("scans");
+          await reload(); alert("Alle Perlen wurden gelöscht.");
+        }}>Alle Perlen löschen (Boxen bleiben)</button>
+        <button className="pm-btn text-destructive" onClick={async () => {
           if (!confirm("Wirklich ALLE lokalen Daten löschen? Diese Aktion kann nur mit einem Backup rückgängig gemacht werden.")) return;
           for (const s of STORES) await clearStore(s);
           await initDB(); reload();
