@@ -388,14 +388,19 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
             <h3 className="font-semibold">Duplikate: {dupes.length ? `${dupes.length} mögliche Übereinstimmung(en) in verschiedenen Scans` : "keine gefunden"}</h3>
             <button className="pm-btn" onClick={() => setDupes(null)}>Schließen</button>
           </div>
-          {dupes.map(({ a, b, dE }, i) => (
-            <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg bg-card p-2 text-sm">
-              <span className="inline-block size-4 rounded-full border" style={{ background: a.hex || "#ccc" }} />
-              <strong>{a.id}</strong><span className="text-muted-foreground">({a.scanId || "kein Scan"})</span>
-              <span>≈</span>
-              <span className="inline-block size-4 rounded-full border" style={{ background: b.hex || "#ccc" }} />
-              <strong>{b.id}</strong><span className="text-muted-foreground">({b.scanId || "kein Scan"})</span>
-              <span className="pm-pill">ΔE {dE.toFixed(1)}</span>
+          {dupes.map(({ a, b, dE, attrs }, i) => (
+            <div key={i} className="grid gap-1 rounded-lg bg-card p-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-block size-4 rounded-full border" style={{ background: a.hex || "#ccc" }} />
+                <strong>{a.id}</strong><span className="text-muted-foreground">({a.scanId || "kein Scan"})</span>
+                <span>≈</span>
+                <span className="inline-block size-4 rounded-full border" style={{ background: b.hex || "#ccc" }} />
+                <strong>{b.id}</strong><span className="text-muted-foreground">({b.scanId || "kein Scan"})</span>
+                <span className="pm-pill">ΔE {dE.toFixed(1)}</span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {attrs.length ? <>Eigenschaften: {attrs.join(" · ")}</> : "Eigenschaften: keine gesetzt"}
+              </div>
             </div>
           ))}
         </div>
