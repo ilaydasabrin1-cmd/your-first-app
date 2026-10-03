@@ -114,3 +114,46 @@ export function download(name: string, type: string, text: string) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+
+export type Pt = { x: number; y: number };
+/** corners normalized 0..1 in order TL, TR, BR, BL. Returns median color per cell (row-major). */
+export async function analyzeGrid(file: File, corners: Pt[], rows: number, cols: number) {
+  const url = URL.createObjectURL(file);
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url;
+  });
+  const max = 1400;
+  const scale = Math.min(1, max / img.width, max / img.height);
+  const w = Math.max(1, Math.round(img.width * scale)), h = Math.max(1, Math.round(img.height * scale));
+  const can = document.createElement("canvas"); can.width = w; can.height = h;
+  const ctx = can.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(img, 0, 0, w, h); URL.revokeObjectURL(url);
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const [tl, tr, br, bl] = corners as [Pt, Pt, Pt, Pt];
+  const map = (u: number, v: number) => {
+    const x = (1 - v) * ((1 - u) * tl.x + u * tr.x) + v * ((1 - u) * bl.x + u * br.x);
+    const y = (1 - v) * ((1 - u) * tl.y + u * tr.y) + v * ((1 - u) * bl.y + u * br.y);
+    return { x: x * w, y: y * h };
+  };
+  const med = (a: number[]) => a.sort((p, q) => p - q)[Math.floor(a.length / 2)]!;
+  const out: { r: number; g: number; b: number; hex: string; confidence: number; warning: string | null }[] = [];
+  const S = 14;
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const rs: number[] = [], gs: number[] = [], bs: number[] = [];
+    for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
+      // inner 50% of the cell to avoid walls
+      const u = (c + 0.25 + 0.5 * (j / (S - 1))) / cols;
+      const v = (r + 0.25 + 0.5 * (i / (S - 1))) / rows;
+      const p = map(u, v);
+      const px = Math.min(w - 1, Math.max(0, Math.round(p.x))), py = Math.min(h - 1, Math.max(0, Math.round(p.y)));
+      const k = (py * w + px) * 4;
+      rs.push(data[k]!); gs.push(data[k + 1]!); bs.push(data[k + 2]!);
+    }
+    const R = med(rs), G = med(gs), B = med(bs);
+    const lum = (0.299 * R + 0.587 * G + 0.114 * B);
+    const hex = "#" + [R, G, B].map((x) => x.toString(16).padStart(2, "0")).join("");
+    const conf = lum > 240 || lum < 15 ? 0.3 : 0.6;
+    out.push({ r: R, g: G, b: B, hex, confidence: conf, warning: conf < 0.5 ? "Sehr hell/dunkel – Reflexion oder Schatten möglich." : null });
+  }
+  return out;
+}
