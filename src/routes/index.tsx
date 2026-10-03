@@ -176,6 +176,12 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
     reload();
   };
 
+  const pickCorner = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (corners.length >= 4) return;
+    const r = e.currentTarget.getBoundingClientRect();
+    setCorners([...corners, { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }]);
+  };
+
   return (
     <>
       <div className="pm-card grid gap-3">
@@ -184,24 +190,48 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
         <div className="flex flex-wrap gap-2">
           <label className="pm-btn-primary">Vorhandenes Foto auswählen
             <input type="file" accept="image/*" hidden onChange={(e) => {
-              const f = e.target.files?.[0]; if (f) setImage({ file: f, url: URL.createObjectURL(f) });
+              const f = e.target.files?.[0]; if (f) { setImage({ file: f, url: URL.createObjectURL(f) }); setCorners([]); }
             }} />
           </label>
           <button className="pm-btn" onClick={async () => {
-            setScanKey(await nextId("SCAN")); setComps([]); setSel(new Set()); setProg(0); setStatus("Neuer Scan bereit.");
+            setScanKey(await nextId("SCAN")); setComps([]); setSel(new Set()); setProg(0); setCorners([]);
+            setStatus(image ? "Neuer Scan bereit. Tippe jetzt die 4 Ecken der Box auf dem Foto an." : "Neuer Scan bereit. Bitte zuerst ein Foto auswählen.");
           }}>Neuen Scan beginnen</button>
         </div>
         {image && <>
-          <img src={image.url} alt="Originalfoto" className="max-h-80 max-w-full rounded-xl bg-secondary object-contain" />
+          <p className="text-sm font-medium">
+            {corners.length < 4 ? `Tippe auf die Ecke: ${CORNER_NAMES[corners.length]} (${corners.length}/4)` : "Alle 4 Ecken gesetzt ✓"}
+          </p>
+          <div className="relative mx-auto w-fit touch-none select-none" onClick={pickCorner}>
+            <img src={image.url} alt="Originalfoto" draggable={false} className="block max-h-[70vh] max-w-full rounded-xl bg-secondary" />
+            <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+              {corners.length === 4 && gridLines(corners, rows, cols).map((l, i) => (
+                <line key={i} x1={l[0]} y1={l[1]} x2={l[2]} y2={l[3]} stroke="var(--primary)" strokeWidth={0.4} vectorEffect="non-scaling-stroke" style={{ strokeWidth: 1.5 }} />
+              ))}
+              {corners.length > 1 && <polyline fill="none" stroke="var(--primary)" style={{ strokeWidth: 2 }} vectorEffect="non-scaling-stroke"
+                points={[...corners, ...(corners.length === 4 ? [corners[0]!] : [])].map((p) => `${p.x * 100},${p.y * 100}`).join(" ")} />}
+            </svg>
+            {corners.map((p, i) => (
+              <span key={i} className="pointer-events-none absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-background bg-primary text-xs font-bold text-primary-foreground shadow"
+                style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}>{i + 1}</span>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="pm-btn" onClick={() => setCorners(corners.slice(0, -1))} disabled={!corners.length}>Letzte Ecke zurück</button>
+            <button className="pm-btn" onClick={() => setCorners([])} disabled={!corners.length}>Ecken neu setzen</button>
+          </div>
           <p className="text-muted-foreground">{image.file.name} · {Math.round(image.file.size / 1024)} KB</p>
         </>}
       </div>
 
       <div className="pm-card grid gap-3">
         <h2 className="text-xl font-semibold">Box-Aufteilung</h2>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="pm-label">Anzahl Fächer
-            <input className="pm-field" type="number" min={1} max={256} value={count} onChange={(e) => setCount(+e.target.value)} />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <label className="pm-label">Reihen
+            <input className="pm-field" type="number" min={1} max={16} value={rows} onChange={(e) => setRows(+e.target.value)} />
+          </label>
+          <label className="pm-label">Spalten
+            <input className="pm-field" type="number" min={1} max={16} value={cols} onChange={(e) => setCols(+e.target.value)} />
           </label>
           <label className="pm-label">Box
             {boxes.length ? (
@@ -211,13 +241,13 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
             ) : <button className="pm-btn" onClick={goBoxes}>Keine Box – jetzt erstellen</button>}
           </label>
         </div>
-        <p className="text-xs text-muted-foreground">Fächerzahl und Zuordnung werden manuell festgelegt; eine automatische Box-Geometrie-Erkennung wird nicht vorgetäuscht.</p>
-        <div><button className="pm-btn" onClick={() => {
-          const n = Math.max(1, Math.min(256, count || 1));
-          setComps(Array.from({ length: n }, (_, i) => ({ number: i + 1, status: "Neu", color: null, attrs: {} })));
-          setSel(new Set());
-        }}>Fächer erzeugen</button></div>
+        <p className="text-xs text-muted-foreground">{Math.max(1, rows || 1) * Math.max(1, cols || 1)} Fächer. Das Raster wird zwischen den 4 Ecken aufgespannt.</p>
+        <div className="flex flex-wrap gap-2">
+          <button className="pm-btn-primary" onClick={scanAll}>Scan starten (alle Fächer analysieren)</button>
+          <button className="pm-btn" onClick={() => { makeComps(); setSel(new Set()); }}>Nur Fächer erzeugen</button>
+        </div>
       </div>
+
 
       <div className="pm-card grid gap-3">
         <div className="flex items-center justify-between"><h2 className="text-xl font-semibold">Fächer</h2><span className="pm-pill">{sel.size} ausgewählt</span></div>
