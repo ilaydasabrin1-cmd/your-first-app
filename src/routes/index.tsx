@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  analyzePixelColor, clearStore, del, deltaE, download, getAll, initDB, nextId, now, put, rgbToLab, STORES, type Rec,
+  analyzeGrid, type Pt, clearStore, del, deltaE, download, getAll, initDB, nextId, now, put, rgbToLab, STORES, type Rec,
 } from "@/lib/perlen-db";
 
 export const Route = createFileRoute("/")({
@@ -460,4 +460,15 @@ function Data({ beads, exportJson, reload }: { beads: Rec[]; exportJson: () => v
       <p className="text-xs text-muted-foreground">Restore überschreibt den lokalen Bestand erst nach Bestätigung. IDs werden aus dem Backup übernommen.</p>
     </div>
   );
+}
+
+const CORNER_NAMES = ["oben links", "oben rechts", "unten rechts", "unten links"];
+function gridLines(c: Pt[], rows: number, cols: number) {
+  const R = Math.max(1, Math.min(16, rows || 1)), C = Math.max(1, Math.min(16, cols || 1));
+  const [tl, tr, br, bl] = c as [Pt, Pt, Pt, Pt];
+  const lerp = (a: Pt, b: Pt, t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  const out: number[][] = [];
+  for (let i = 1; i < C; i++) { const a = lerp(tl, tr, i / C), b = lerp(bl, br, i / C); out.push([a.x * 100, a.y * 100, b.x * 100, b.y * 100]); }
+  for (let i = 1; i < R; i++) { const a = lerp(tl, bl, i / R), b = lerp(tr, br, i / R); out.push([a.x * 100, a.y * 100, b.x * 100, b.y * 100]); }
+  return out;
 }
