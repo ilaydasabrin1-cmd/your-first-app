@@ -126,7 +126,9 @@ function Dashboard({ beads, boxes, scans }: { beads: Rec[]; boxes: Rec[]; scans:
 function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<void>; goBoxes: () => void }) {
   const [image, setImage] = useState<{ file: File; url: string } | null>(null);
   const [scanKey, setScanKey] = useState<string | null>(null);
-  const [count, setCount] = useState(12);
+  const [rows, setRows] = useState(4);
+  const [cols, setCols] = useState(6);
+  const [corners, setCorners] = useState<Pt[]>([]);
   const [box, setBox] = useState("");
   const [comps, setComps] = useState<Comp[]>([]);
   const [sel, setSel] = useState<Set<number>>(new Set());
@@ -139,17 +141,36 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
 
   const toggle = (i: number) => setSel((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
 
-  const analyze = async () => {
+  const R = Math.max(1, Math.min(16, rows || 1)), C = Math.max(1, Math.min(16, cols || 1));
+  const makeComps = () => {
+    const n = R * C;
+    const cs: Comp[] = Array.from({ length: n }, (_, i) => ({ number: i + 1, status: "Neu", color: null, attrs: {} }));
+    setComps(cs); return cs;
+  };
+
+  const runAnalysis = async (base: Comp[], idx: Set<number>) => {
     if (!image) return setStatus("Bitte zuerst ein Foto auswählen.");
-    if (!sel.size) return setStatus("Bitte mindestens ein Fach auswählen.");
-    setProg(5); setStatus("Lokale Messung läuft …");
+    if (corners.length < 4) return setStatus("Bitte zuerst die 4 Ecken der Box auf dem Foto antippen.");
+    if (base.length !== R * C) return setStatus("Fächerzahl passt nicht zu Reihen × Spalten – bitte Scan starten.");
+    setProg(10); setStatus("Lokale Messung läuft …");
     try {
-      const c = await analyzePixelColor(image.file);
-      setComps((cs) => cs.map((x, i) => sel.has(i)
-        ? { ...x, hex: c.hex, rgb: { r: c.r, g: c.g, b: c.b }, confidence: c.confidence, warning: c.warning, status: "Unsicher" } : x));
+      const res = await analyzeGrid(image.file, corners, R, C);
+      setComps(base.map((x, i) => idx.has(i)
+        ? { ...x, hex: res[i]!.hex, rgb: { r: res[i]!.r, g: res[i]!.g, b: res[i]!.b }, confidence: res[i]!.confidence, warning: res[i]!.warning, status: "Unsicher" } : x));
       setProg(100);
-      setStatus(`${sel.size} Fach/Fächer gemessen. Wegen fehlender sicherer Fach-/Lochsegmentierung als unsicher markiert.`);
+      setStatus(`${idx.size} Fach/Fächer gemessen. Bitte Farben prüfen und dann speichern.`);
     } catch (e) { setStatus("Analysefehler: " + (e as Error).message); setProg(0); }
+  };
+
+  const analyze = () => {
+    const idx = sel.size ? sel : new Set(comps.map((_, i) => i));
+    return runAnalysis(comps, idx);
+  };
+  const scanAll = () => {
+    const cs = comps.length === R * C ? comps : makeComps();
+    const all = new Set(cs.map((_, i) => i));
+    setSel(new Set());
+    return runAnalysis(cs, all);
   };
 
   const save = async () => {
