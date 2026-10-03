@@ -651,6 +651,48 @@ function Sort({ beads, boxes, reload }: { beads: Rec[]; boxes: Rec[]; reload: ()
         </div>
       </div>
 
+      <div className="pm-card grid gap-3">
+        <h2 className="text-xl font-semibold">Manuell sortieren</h2>
+        {!beads.length && <p className="text-muted-foreground">Noch keine Perlen im Bestand.</p>}
+        <div className="grid gap-2">
+          {beads.map((b) => {
+            const m = manual[b.key] || { box: "", comp: "" };
+            const box = boxes.find((x) => x.key === m.box);
+            return (
+              <div key={b.key} className="flex flex-wrap items-center gap-2 rounded-xl border bg-card p-2.5 text-sm">
+                <span className="inline-block size-5 rounded-full border" style={{ background: b.hex || "#ccc" }} />
+                <strong>{b.id}</strong>
+                <span className="text-muted-foreground">
+                  {b.currentBox ? `${boxes.find((x) => x.key === b.currentBox)?.name || b.currentBox}, Fach ${b.currentCompartment || "–"}` : "ohne Box"}
+                </span>
+                <select
+                  className="pm-field"
+                  value={m.box}
+                  onChange={(e) => setManual((s) => ({ ...s, [b.key]: { box: e.target.value, comp: "" } }))}
+                >
+                  <option value="">Box wählen…</option>
+                  {boxes.map((x) => (
+                    <option key={x.key} value={x.key}>{x.name}</option>
+                  ))}
+                </select>
+                <select
+                  className="pm-field"
+                  value={m.comp}
+                  disabled={!box}
+                  onChange={(e) => setManual((s) => ({ ...s, [b.key]: { ...m, comp: e.target.value } }))}
+                >
+                  <option value="">Fach…</option>
+                  {box && Array.from({ length: box.compartmentCount || 1 }, (_, i) => (
+                    <option key={i + 1} value={String(i + 1)}>Fach {i + 1}</option>
+                  ))}
+                </select>
+                <button className="pm-btn" onClick={() => assignBead(b)}>Zuweisen</button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       {plan && (
         <div className="grid gap-3">
           {plan.map((p) => (
