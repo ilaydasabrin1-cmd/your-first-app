@@ -335,7 +335,7 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
   const [st, setSt] = useState("");
   const [detail, setDetail] = useState<Rec | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [dupes, setDupes] = useState<{ a: Rec; b: Rec; dE: number }[] | null>(null);
+  const [dupes, setDupes] = useState<{ a: Rec; b: Rec; dE: number; attrs: string[] }[] | null>(null);
   const dlg = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (detail) dlg.current?.showModal(); }, [detail]);
   const arr = beads.filter((b) => (!q || JSON.stringify(b).toLowerCase().includes(q.toLowerCase())) && (!st || b.status === st));
