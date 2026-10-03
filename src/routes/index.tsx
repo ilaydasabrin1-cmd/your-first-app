@@ -344,7 +344,7 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
   const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const checkDupes = () => {
     const list = beads.filter((b) => sel.has(b.key) && b.rgb);
-    const lab = new Map(list.map((b) => [b.key, rgbToLab(b.rgb.r, b.rgb.g, b.rgb.b)]));
+    const lab = new Map(list.map((b) => [b.key, rgbToLab(b.rgb)]));
     const found: { a: Rec; b: Rec; dE: number }[] = [];
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
       const a = list[i], b = list[j];
