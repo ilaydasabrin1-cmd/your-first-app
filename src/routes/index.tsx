@@ -174,17 +174,17 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
   };
 
   const save = async () => {
-    if (!comps.length) return setStatus("Keine Fächer vorhanden.");
-    if (!box) return setStatus("Bitte zuerst eine Box erstellen.");
+    if (!comps.some((c) => c.hex)) return setStatus("Bitte zuerst einen Scan starten.");
     const sk = scanKey || (await nextId("SCAN"));
     setScanKey(sk);
+    const b = box || null;
     let saved = 0;
     for (const c of comps) {
-      if (c.status === "Neu") continue;
+      if (!c.hex || c.saved) continue;
       const id = await nextId("ID");
       await put("beads", {
         key: id, id, scanId: sk, createdAt: now(), updatedAt: now(),
-        originalBox: box, originalCompartment: c.number, currentBox: box, currentCompartment: c.number,
+        originalBox: b, originalCompartment: c.number, currentBox: b, currentCompartment: c.number,
         color: c.color || null, colorGroup: null, colorName: null, colorCode: null, hex: c.hex || null, rgb: c.rgb || null,
         oklab: null, cielab: null, deltaE00: null, fingerprint: null, confidence: c.confidence ?? null,
         reflectionPercentage: null, brightness: null, chroma: null, saturation: null, distribution: null,
@@ -192,8 +192,9 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
       });
       saved++;
     }
-    await put("scans", { key: sk, createdAt: now(), compartments: comps, box });
-    setStatus(`${saved} Bestand/Bestände gespeichert.`);
+    setComps((cs) => cs.map((c) => (c.hex ? { ...c, saved: true } : c)));
+    await put("scans", { key: sk, createdAt: now(), compartments: comps, box: b });
+    setStatus(`${saved} Perle(n) gespeichert. Eigenschaften kannst du später im Bestand zuweisen.`);
     reload();
   };
 
@@ -260,19 +261,21 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
           <label className="pm-label">Spalten
             <input className="pm-field" type="number" min={1} max={16} value={cols} onChange={(e) => setCols(+e.target.value)} />
           </label>
-          <label className="pm-label">Box
-            {boxes.length ? (
-              <select className="pm-field" value={box} onChange={(e) => setBox(e.target.value)}>
-                {boxes.map((b) => <option key={b.key} value={b.key}>{b.name} ({b.key})</option>)}
-              </select>
-            ) : <button className="pm-btn" onClick={goBoxes}>Keine Box – jetzt erstellen</button>}
+          <label className="pm-label">Box (optional)
+            <select className="pm-field" value={box} onChange={(e) => setBox(e.target.value)}>
+              <option value="">Ohne Box</option>
+              {boxes.map((b) => <option key={b.key} value={b.key}>{b.name} ({b.key})</option>)}
+            </select>
           </label>
         </div>
         <p className="text-xs text-muted-foreground">{Math.max(1, rows || 1) * Math.max(1, cols || 1)} Fächer. Das Raster wird zwischen den 4 Ecken aufgespannt.</p>
         <div className="flex flex-wrap gap-2">
           <button className="pm-btn-primary" onClick={scanAll}>Scan starten (alle Fächer analysieren)</button>
+          <button className="pm-btn-primary" onClick={save} disabled={!comps.some((c) => c.hex)}>Perlen speichern</button>
           <button className="pm-btn" onClick={() => { makeComps(); setSel(new Set()); }}>Nur Fächer erzeugen</button>
         </div>
+        <p className="text-sm text-muted-foreground">{status}</p>
+        {!boxes.length && <button className="w-fit text-xs underline text-muted-foreground" onClick={goBoxes}>Box anlegen (optional)</button>}
       </div>
 
 
@@ -327,7 +330,7 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
   );
 }
 
-function Inventory({ beads }: { beads: Rec[] }) {
+function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void> }) {
   const [q, setQ] = useState("");
   const [st, setSt] = useState("");
   const [detail, setDetail] = useState<Rec | null>(null);
@@ -366,11 +369,29 @@ function Inventory({ beads }: { beads: Rec[] }) {
       </div>
       <dialog ref={dlg} onClose={() => setDetail(null)} className="m-auto w-[calc(100%-28px)] max-w-2xl rounded-2xl border-0 bg-card p-5 text-card-foreground shadow-soft backdrop:bg-primary/35">
         <div className="mb-3 flex items-center justify-between"><h2 className="text-xl font-semibold">Bestandsdetails</h2><button className="pm-btn" onClick={() => dlg.current?.close()}>Schließen</button></div>
-        {detail && <dl className="grid gap-1 text-sm">
-          {Object.entries(detail).filter(([k]) => !["history", "manualChanges"].includes(k)).map(([k, v]) => (
-            <div key={k}><dt className="font-semibold">{k}</dt><dd className="break-all text-muted-foreground">{v !== null && typeof v === "object" ? JSON.stringify(v) : String(v ?? "—")}</dd></div>
-          ))}
-        </dl>}
+        {detail && <>
+          <div className="mb-4 grid gap-3 rounded-xl bg-secondary p-3">
+            <h3 className="font-semibold">Eigenschaften zuweisen</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {Object.entries(ATTRS).map(([k, vals]) => (
+                <label key={k} className="pm-label">{ATTR_LABEL[k]}
+                  <select className="pm-field" value={detail[k] || ""} onChange={(e) => setDetail({ ...detail, [k]: e.target.value || null })}>
+                    {vals.map((v) => <option key={v} value={v}>{v || "—"}</option>)}
+                  </select>
+                </label>
+              ))}
+            </div>
+            <div><button className="pm-btn-primary" onClick={async () => {
+              const rec = { ...detail, status: "Manuell korrigiert", updatedAt: now() };
+              await put("beads", rec); setDetail(rec); await reload(); dlg.current?.close();
+            }}>Eigenschaften speichern</button></div>
+          </div>
+          <dl className="grid gap-1 text-sm">
+            {Object.entries(detail).filter(([k]) => !["history", "manualChanges"].includes(k)).map(([k, v]) => (
+              <div key={k}><dt className="font-semibold">{k}</dt><dd className="break-all text-muted-foreground">{v !== null && typeof v === "object" ? JSON.stringify(v) : String(v ?? "—")}</dd></div>
+            ))}
+          </dl>
+        </>}
       </dialog>
     </div>
   );
