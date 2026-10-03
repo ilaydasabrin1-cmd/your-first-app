@@ -334,9 +334,27 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
   const [q, setQ] = useState("");
   const [st, setSt] = useState("");
   const [detail, setDetail] = useState<Rec | null>(null);
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [dupes, setDupes] = useState<{ a: Rec; b: Rec; dE: number }[] | null>(null);
   const dlg = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (detail) dlg.current?.showModal(); }, [detail]);
   const arr = beads.filter((b) => (!q || JSON.stringify(b).toLowerCase().includes(q.toLowerCase())) && (!st || b.status === st));
+  const allSel = arr.length > 0 && arr.every((b) => sel.has(b.key));
+  const toggleAll = () => setSel(allSel ? new Set() : new Set(arr.map((b) => b.key)));
+  const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const checkDupes = () => {
+    const list = beads.filter((b) => sel.has(b.key) && b.rgb);
+    const lab = new Map(list.map((b) => [b.key, rgbToLab(b.rgb)]));
+    const found: { a: Rec; b: Rec; dE: number }[] = [];
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const a = list[i], b = list[j];
+      if (a.scanId && b.scanId && a.scanId === b.scanId) continue;
+      const dE = deltaE(lab.get(a.key)!, lab.get(b.key)!);
+      if (dE <= 8) found.push({ a, b, dE });
+    }
+    found.sort((x, y) => x.dE - y.dE);
+    setDupes(found);
+  };
   return (
     <div className="pm-card grid gap-3">
       <div className="flex items-center justify-between"><h2 className="text-xl font-semibold">Bestand</h2><span className="pm-pill">{arr.length} / {beads.length}</span></div>
@@ -347,12 +365,37 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
           {["Unsicher", "Analysiert", "Manuell korrigiert", "Geprüft", "Gespeichert"].map((s) => <option key={s}>{s}</option>)}
         </select>
       </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button className="pm-btn" onClick={toggleAll}>{allSel ? "Auswahl aufheben" : "Alle auswählen"}</button>
+        <button className="pm-btn-primary" disabled={sel.size < 2} onClick={checkDupes}>Duplikate prüfen ({sel.size} ausgewählt)</button>
+      </div>
+      {dupes !== null && (
+        <div className="grid gap-2 rounded-xl bg-secondary p-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold">Duplikate: {dupes.length ? `${dupes.length} mögliche Übereinstimmung(en) in verschiedenen Scans` : "keine gefunden"}</h3>
+            <button className="pm-btn" onClick={() => setDupes(null)}>Schließen</button>
+          </div>
+          {dupes.map(({ a, b, dE }, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg bg-card p-2 text-sm">
+              <span className="inline-block size-4 rounded-full border" style={{ background: a.hex || "#ccc" }} />
+              <strong>{a.id}</strong><span className="text-muted-foreground">({a.scanId || "kein Scan"})</span>
+              <span>≈</span>
+              <span className="inline-block size-4 rounded-full border" style={{ background: b.hex || "#ccc" }} />
+              <strong>{b.id}</strong><span className="text-muted-foreground">({b.scanId || "kein Scan"})</span>
+              <span className="pm-pill">ΔE {dE.toFixed(1)}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
-          <thead><tr className="text-left">{["ID", "Farbe", "Farbgruppe", "Farbname", "Farbcode", "Standort", "Status"].map((h) => <th key={h} className="border-b p-2.5">{h}</th>)}</tr></thead>
+          <thead><tr className="text-left">{["", "ID", "Farbe", "Farbgruppe", "Farbname", "Farbcode", "Standort", "Status"].map((h, i) => <th key={i} className="border-b p-2.5">{i === 0 ? <input type="checkbox" checked={allSel} onChange={toggleAll} aria-label="Alle auswählen" /> : h}</th>)}</tr></thead>
           <tbody>
             {arr.map((b) => (
               <tr key={b.key} onClick={() => setDetail(b)} className="cursor-pointer hover:bg-muted">
+                <td className="border-b p-2.5" onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" checked={sel.has(b.key)} onChange={() => toggle(b.key)} aria-label={`Perle ${b.id} auswählen`} />
+                </td>
                 <td className="border-b p-2.5"><strong>{b.id}</strong><div className="text-xs">{b.scanId}</div></td>
                 <td className="border-b p-2.5"><span className="inline-flex items-center gap-1.5">
                   {b.hex && <span className="inline-block size-4 rounded-full border" style={{ background: b.hex }} />}{b.color || "—"} {b.hex && <span className="pm-pill">{b.hex}</span>}</span></td>
@@ -363,7 +406,7 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
                 <td className="border-b p-2.5"><span className="pm-pill">{b.status}</span></td>
               </tr>
             ))}
-            {!arr.length && <tr><td colSpan={7} className="p-2.5 text-muted-foreground">Keine Einträge.</td></tr>}
+            {!arr.length && <tr><td colSpan={8} className="p-2.5 text-muted-foreground">Keine Einträge.</td></tr>}
           </tbody>
         </table>
       </div>
