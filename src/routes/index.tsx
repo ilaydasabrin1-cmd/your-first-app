@@ -183,7 +183,7 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
         <p className="text-muted-foreground">Originalfoto bleibt unverändert. Die lokale Analyse erzeugt keine erfundenen Messwerte.</p>
         <div className="flex flex-wrap gap-2">
           <label className="pm-btn-primary">Vorhandenes Foto auswählen
-            <input type="file" accept="image/*" capture="environment" hidden onChange={(e) => {
+            <input type="file" accept="image/*" hidden onChange={(e) => {
               const f = e.target.files?.[0]; if (f) setImage({ file: f, url: URL.createObjectURL(f) });
             }} />
           </label>
