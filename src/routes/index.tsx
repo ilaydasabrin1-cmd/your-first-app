@@ -335,7 +335,7 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
   const [st, setSt] = useState("");
   const [detail, setDetail] = useState<Rec | null>(null);
   const [sel, setSel] = useState<Set<string>>(new Set());
-  const [dupes, setDupes] = useState<{ a: Rec; b: Rec; dE: number }[] | null>(null);
+  const [dupes, setDupes] = useState<{ a: Rec; b: Rec; dE: number; attrs: string[] }[] | null>(null);
   const dlg = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (detail) dlg.current?.showModal(); }, [detail]);
   const arr = beads.filter((b) => (!q || JSON.stringify(b).toLowerCase().includes(q.toLowerCase())) && (!st || b.status === st));
@@ -345,12 +345,25 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
   const checkDupes = () => {
     const list = beads.filter((b) => sel.has(b.key) && b.rgb);
     const lab = new Map(list.map((b) => [b.key, rgbToLab(b.rgb)]));
-    const found: { a: Rec; b: Rec; dE: number }[] = [];
+    const found: { a: Rec; b: Rec; dE: number; attrs: string[] }[] = [];
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
       const a = list[i], b = list[j];
       if (a.scanId && b.scanId && a.scanId === b.scanId) continue;
+      // Farb-Übereinstimmung ...
       const dE = deltaE(lab.get(a.key)!, lab.get(b.key)!);
-      if (dE <= 8) found.push({ a, b, dE });
+      if (dE > 8) continue;
+      // ... plus Eigenschaften: gesetzt u. verschieden = kein Duplikat;
+      // Eigenschaften, die nur bei einer Perle gesetzt sind, werden als offen gemeldet.
+      const shared: string[] = [], open: string[] = [];
+      let conflict = false;
+      for (const k of Object.keys(ATTRS)) {
+        const av = a.attrs?.[k] || "", bv = b.attrs?.[k] || "";
+        if (av && bv && av !== bv) { conflict = true; break; }
+        if (av && bv) shared.push(`${ATTR_LABEL[k]}: ${av}`);
+        else if (av || bv) open.push(`${ATTR_LABEL[k]}: ${av || bv} (nur ${av ? a.id : b.id})`);
+      }
+      if (conflict) continue;
+      found.push({ a, b, dE, attrs: [...shared, ...open] });
     }
     found.sort((x, y) => x.dE - y.dE);
     setDupes(found);
@@ -375,14 +388,19 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
             <h3 className="font-semibold">Duplikate: {dupes.length ? `${dupes.length} mögliche Übereinstimmung(en) in verschiedenen Scans` : "keine gefunden"}</h3>
             <button className="pm-btn" onClick={() => setDupes(null)}>Schließen</button>
           </div>
-          {dupes.map(({ a, b, dE }, i) => (
-            <div key={i} className="flex flex-wrap items-center gap-2 rounded-lg bg-card p-2 text-sm">
-              <span className="inline-block size-4 rounded-full border" style={{ background: a.hex || "#ccc" }} />
-              <strong>{a.id}</strong><span className="text-muted-foreground">({a.scanId || "kein Scan"})</span>
-              <span>≈</span>
-              <span className="inline-block size-4 rounded-full border" style={{ background: b.hex || "#ccc" }} />
-              <strong>{b.id}</strong><span className="text-muted-foreground">({b.scanId || "kein Scan"})</span>
-              <span className="pm-pill">ΔE {dE.toFixed(1)}</span>
+          {dupes.map(({ a, b, dE, attrs }, i) => (
+            <div key={i} className="grid gap-1 rounded-lg bg-card p-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-block size-4 rounded-full border" style={{ background: a.hex || "#ccc" }} />
+                <strong>{a.id}</strong><span className="text-muted-foreground">({a.scanId || "kein Scan"})</span>
+                <span>≈</span>
+                <span className="inline-block size-4 rounded-full border" style={{ background: b.hex || "#ccc" }} />
+                <strong>{b.id}</strong><span className="text-muted-foreground">({b.scanId || "kein Scan"})</span>
+                <span className="pm-pill">ΔE {dE.toFixed(1)}</span>
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {attrs.length ? <>Eigenschaften: {attrs.join(" · ")}</> : "Eigenschaften: keine gesetzt"}
+              </div>
             </div>
           ))}
         </div>
