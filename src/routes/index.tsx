@@ -393,6 +393,9 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
           <tbody>
             {arr.map((b) => (
               <tr key={b.key} onClick={() => setDetail(b)} className="cursor-pointer hover:bg-muted">
+                <td className="border-b p-2.5" onClick={(e) => e.stopPropagation()}>
+                  <input type="checkbox" checked={sel.has(b.key)} onChange={() => toggle(b.key)} aria-label={`Perle ${b.id} auswählen`} />
+                </td>
                 <td className="border-b p-2.5"><strong>{b.id}</strong><div className="text-xs">{b.scanId}</div></td>
                 <td className="border-b p-2.5"><span className="inline-flex items-center gap-1.5">
                   {b.hex && <span className="inline-block size-4 rounded-full border" style={{ background: b.hex }} />}{b.color || "—"} {b.hex && <span className="pm-pill">{b.hex}</span>}</span></td>
