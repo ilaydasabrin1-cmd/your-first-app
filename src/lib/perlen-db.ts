@@ -59,12 +59,13 @@ export async function nextId(prefix: "ID" | "SCAN" | "BOX") {
 export const now = () => new Date().toISOString();
 
 export function rgbToLab({ r, g, b }: { r: number; g: number; b: number }) {
-  const [R, G, B] = [r, g, b].map((v) => v / 255).map((v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+  const lin = (v: number) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const R = lin(r), G = lin(g), B = lin(b);
   const x = (R * 0.4124 + G * 0.3576 + B * 0.1805) / 0.95047;
   const y = R * 0.2126 + G * 0.7152 + B * 0.0722;
   const z = (R * 0.0193 + G * 0.1192 + B * 0.9505) / 1.08883;
   const f = (v: number) => (v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116);
-  const [fx, fy, fz] = [f(x), f(y), f(z)];
+  const fx = f(x), fy = f(y), fz = f(z);
   return { L: 116 * fy - 16, a: 500 * (fx - fy), b: 200 * (fy - fz) };
 }
 
@@ -93,11 +94,11 @@ export async function analyzePixelColor(file: File) {
   const d = ctx.getImageData(Math.floor(w * 0.2), Math.floor(h * 0.2), Math.max(1, Math.floor(w * 0.6)), Math.max(1, Math.floor(h * 0.6))).data;
   const rs: number[] = [], gs: number[] = [], bs: number[] = [];
   for (let i = 0; i < d.length; i += 4) {
-    if (d[i + 3] < 200) continue;
-    rs.push(d[i]); gs.push(d[i + 1]); bs.push(d[i + 2]);
+    if (d[i + 3]! < 200) continue;
+    rs.push(d[i]!); gs.push(d[i + 1]!); bs.push(d[i + 2]!);
   }
   if (!rs.length) throw Error("Keine analysierbaren Pixel.");
-  const med = (a: number[]) => a.sort((x, y) => x - y)[Math.floor(a.length / 2)];
+  const med = (a: number[]) => a.sort((x, y) => x - y)[Math.floor(a.length / 2)]!;
   const r = med(rs), g = med(gs), b = med(bs);
   const hex = "#" + [r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("");
   return {
