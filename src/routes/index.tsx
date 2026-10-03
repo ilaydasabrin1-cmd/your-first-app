@@ -532,6 +532,16 @@ function Sort({ beads, boxes, reload }: { beads: Rec[]; boxes: Rec[]; reload: ()
   const [boxSel, setBoxSel] = useState<Set<string>>(new Set());
   const [onlyUnsorted, setOnlyUnsorted] = useState(false);
   const [plan, setPlan] = useState<SortPlan[] | null>(null);
+  const [manual, setManual] = useState<Record<string, { box: string; comp: string }>>({});
+
+  const assignBead = async (b: Rec) => {
+    const m = manual[b.key];
+    if (!m?.box) return alert("Bitte zuerst eine Box wählen.");
+    const box = boxes.find((x) => x.key === m.box);
+    const comp = Math.max(1, Math.min(box?.compartmentCount || 1, parseInt(m.comp) || 1));
+    await put("beads", { ...b, currentBox: m.box, currentCompartment: comp, updatedAt: now() });
+    await reload();
+  };
 
   const toggleCrit = (k: string) =>
     setCriteria((cs) => (cs.includes(k) ? cs.filter((c) => c !== k) : [...cs, k]));
@@ -597,10 +607,6 @@ function Sort({ beads, boxes, reload }: { beads: Rec[]; boxes: Rec[]; reload: ()
     <>
       <div className="pm-card grid gap-3">
         <h2 className="text-xl font-semibold">Sortierkriterien</h2>
-        <p className="text-muted-foreground">
-          Wähle, wonach gruppiert wird – die Reihenfolge entscheidet: z. B. „Farbe + Oberfläche" legt alle roten glänzenden Perlen gemeinsam in ein Fach.
-          So kannst du deine Boxen zuhause nach demselben Schema einsortieren.
-        </p>
         <div className="grid gap-2">
           {Object.entries(SORT_CRITERIA).map(([k, label]) => {
             const pos = criteria.indexOf(k);
@@ -629,7 +635,6 @@ function Sort({ beads, boxes, reload }: { beads: Rec[]; boxes: Rec[]; reload: ()
 
       <div className="pm-card grid gap-3">
         <h2 className="text-xl font-semibold">Ziel-Boxen</h2>
-        <p className="text-muted-foreground">Keine Auswahl = alle Boxen werden der Reihe nach befüllt.</p>
         <div className="flex flex-wrap gap-2">
           {boxes.map((b) => (
             <label key={b.key} className="pm-pill flex cursor-pointer items-center gap-1.5">
