@@ -406,7 +406,7 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
                 <td className="border-b p-2.5"><span className="pm-pill">{b.status}</span></td>
               </tr>
             ))}
-            {!arr.length && <tr><td colSpan={7} className="p-2.5 text-muted-foreground">Keine Einträge.</td></tr>}
+            {!arr.length && <tr><td colSpan={8} className="p-2.5 text-muted-foreground">Keine Einträge.</td></tr>}
           </tbody>
         </table>
       </div>
