@@ -156,7 +156,7 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
     try {
       const res = await analyzeGrid(image.file, corners, R, C);
       setComps(base.map((x, i) => idx.has(i)
-        ? { ...x, hex: res[i]!.hex, rgb: { r: res[i]!.r, g: res[i]!.g, b: res[i]!.b }, confidence: res[i]!.confidence, warning: res[i]!.warning, status: "Unsicher" } : x));
+        ? { ...x, hex: res[i]!.hex, rgb: { r: res[i]!.r, g: res[i]!.g, b: res[i]!.b }, confidence: res[i]!.confidence, warning: res[i]!.warning ?? "", status: "Unsicher" } : x));
       setProg(100);
       setStatus(`${idx.size} Fach/Fächer gemessen. Bitte Farben prüfen und dann speichern.`);
     } catch (e) { setStatus("Analysefehler: " + (e as Error).message); setProg(0); }
