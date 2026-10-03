@@ -197,10 +197,16 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
     reload();
   };
 
-  const pickCorner = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (corners.length >= 4) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    setCorners([...corners, { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }]);
+  const DEFAULT_CORNERS: Pt[] = [{ x: 0.12, y: 0.12 }, { x: 0.88, y: 0.12 }, { x: 0.88, y: 0.88 }, { x: 0.12, y: 0.88 }];
+  const frameRef = useRef<HTMLDivElement>(null);
+  const dragIdx = useRef<number | null>(null);
+  const moveCorner = (e: React.PointerEvent) => {
+    const i = dragIdx.current; const el = frameRef.current;
+    if (i === null || !el) return;
+    const r = el.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - r.top) / r.height));
+    setCorners((cs) => cs.map((p, k) => (k === i ? { x, y } : p)));
   };
 
   return (
@@ -211,35 +217,35 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
         <div className="flex flex-wrap gap-2">
           <label className="pm-btn-primary">Vorhandenes Foto auswählen
             <input type="file" accept="image/*" hidden onChange={(e) => {
-              const f = e.target.files?.[0]; if (f) { setImage({ file: f, url: URL.createObjectURL(f) }); setCorners([]); }
+              const f = e.target.files?.[0]; if (f) { setImage({ file: f, url: URL.createObjectURL(f) }); setCorners(DEFAULT_CORNERS); }
             }} />
           </label>
           <button className="pm-btn" onClick={async () => {
-            setScanKey(await nextId("SCAN")); setComps([]); setSel(new Set()); setProg(0); setCorners([]);
-            setStatus(image ? "Neuer Scan bereit. Tippe jetzt die 4 Ecken der Box auf dem Foto an." : "Neuer Scan bereit. Bitte zuerst ein Foto auswählen.");
+            setScanKey(await nextId("SCAN")); setComps([]); setSel(new Set()); setProg(0); setCorners(DEFAULT_CORNERS);
+            setStatus(image ? "Neuer Scan bereit. Ziehe die 4 Ecken des Rasters auf die Ecken der Box." : "Neuer Scan bereit. Bitte zuerst ein Foto auswählen.");
           }}>Neuen Scan beginnen</button>
         </div>
         {image && <>
-          <p className="text-sm font-medium">
-            {corners.length < 4 ? `Tippe auf die Ecke: ${CORNER_NAMES[corners.length]} (${corners.length}/4)` : "Alle 4 Ecken gesetzt ✓"}
-          </p>
-          <div className="relative mx-auto w-fit touch-none select-none" onClick={pickCorner}>
+          <p className="text-sm font-medium">Ziehe die 4 Eckpunkte auf die Ecken der Box – das Raster passt sich an.</p>
+          <div ref={frameRef} className="relative mx-auto w-fit touch-none select-none"
+            onPointerMove={moveCorner} onPointerUp={() => (dragIdx.current = null)} onPointerCancel={() => (dragIdx.current = null)}>
             <img src={image.url} alt="Originalfoto" draggable={false} className="block max-h-[70vh] max-w-full rounded-xl bg-secondary" />
             <svg className="pointer-events-none absolute inset-0 h-full w-full" viewBox="0 0 100 100" preserveAspectRatio="none">
               {corners.length === 4 && gridLines(corners, rows, cols).map((l, i) => (
-                <line key={i} x1={l[0]} y1={l[1]} x2={l[2]} y2={l[3]} stroke="var(--primary)" strokeWidth={0.4} vectorEffect="non-scaling-stroke" style={{ strokeWidth: 1.5 }} />
+                <line key={i} x1={l[0]} y1={l[1]} x2={l[2]} y2={l[3]} stroke="var(--primary)" vectorEffect="non-scaling-stroke" style={{ strokeWidth: 1.5 }} />
               ))}
-              {corners.length > 1 && <polyline fill="none" stroke="var(--primary)" style={{ strokeWidth: 2 }} vectorEffect="non-scaling-stroke"
-                points={[...corners, ...(corners.length === 4 ? [corners[0]!] : [])].map((p) => `${p.x * 100},${p.y * 100}`).join(" ")} />}
+              {corners.length === 4 && <polygon fill="none" stroke="var(--primary)" style={{ strokeWidth: 2.5 }} vectorEffect="non-scaling-stroke"
+                points={corners.map((p) => `${p.x * 100},${p.y * 100}`).join(" ")} />}
             </svg>
             {corners.map((p, i) => (
-              <span key={i} className="pointer-events-none absolute flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-background bg-primary text-xs font-bold text-primary-foreground shadow"
+              <span key={i}
+                onPointerDown={(e) => { e.preventDefault(); dragIdx.current = i; frameRef.current?.setPointerCapture(e.pointerId); }}
+                className="absolute flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 cursor-grab items-center justify-center rounded-full border-2 border-background bg-primary/80 text-xs font-bold text-primary-foreground shadow active:cursor-grabbing"
                 style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}>{i + 1}</span>
             ))}
           </div>
           <div className="flex flex-wrap gap-2">
-            <button className="pm-btn" onClick={() => setCorners(corners.slice(0, -1))} disabled={!corners.length}>Letzte Ecke zurück</button>
-            <button className="pm-btn" onClick={() => setCorners([])} disabled={!corners.length}>Ecken neu setzen</button>
+            <button className="pm-btn" onClick={() => setCorners(DEFAULT_CORNERS)}>Raster zurücksetzen</button>
           </div>
           <p className="text-muted-foreground">{image.file.name} · {Math.round(image.file.size / 1024)} KB</p>
         </>}
@@ -462,7 +468,6 @@ function Data({ beads, exportJson, reload }: { beads: Rec[]; exportJson: () => v
   );
 }
 
-const CORNER_NAMES = ["oben links", "oben rechts", "unten rechts", "unten links"];
 function gridLines(c: Pt[], rows: number, cols: number) {
   const R = Math.max(1, Math.min(16, rows || 1)), C = Math.max(1, Math.min(16, cols || 1));
   const [tl, tr, br, bl] = c as [Pt, Pt, Pt, Pt];
