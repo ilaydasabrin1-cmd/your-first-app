@@ -38,7 +38,7 @@ type Tab = (typeof TABS)[number][0];
 
 type Comp = {
   number: number; status: string; color: string | null; attrs: Record<string, string>;
-  hex?: string; rgb?: { r: number; g: number; b: number }; confidence?: number; warning?: string; colorName?: string;
+  hex?: string; rgb?: { r: number; g: number; b: number }; confidence?: number; warning?: string; colorName?: string; saved?: boolean;
 };
 
 function App() {
