@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#FBEDE9">
+<meta name="description" content="Offline Perlen-Manager für Farbanalyse und Inventarverwaltung">
+<title>Perlen-Manager</title>
+<style>
+:root{
+  --bg:#FBEDE9;--card:#fff;--soft:#ECD8D7;--text:#0E1627;--muted:#667085;
+  --border:#e7d8d6;--danger:#b42318;--ok:#177245;--shadow:0 8px 28px rgba(14,22,39,.08);
+  --radius:18px;
+}
+*{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+button,input,select,textarea{font:inherit} button{border:0;cursor:pointer;color:var(--text)}
+.app{max-width:1200px;margin:auto;padding:16px}
+header{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}
+h1,h2,h3{margin:.15rem 0 .6rem}.sub{color:var(--muted)}
+nav{display:flex;gap:8px;overflow:auto;padding-bottom:10px}
+nav button,.btn{background:var(--soft);padding:11px 15px;border-radius:13px;min-height:44px}
+nav button.active{background:#fff;box-shadow:var(--shadow)}
+main section{display:none}.active-section{display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)}
+.kpi{font-size:27px;font-weight:750}.muted{color:var(--muted)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.between{justify-content:space-between}
+label{display:grid;gap:5px;font-weight:600}.field{width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;color:var(--text)}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:14px;overflow:hidden}
+th,td{text-align:left;padding:10px;border-bottom:1px solid var(--border);vertical-align:top}
+.small{font-size:12px}.pill{display:inline-flex;padding:4px 8px;border-radius:999px;background:var(--soft);font-size:12px}
+.danger{color:var(--danger)}.ok{color:var(--ok)}.hidden{display:none!important}
+.preview{max-height:330px;max-width:100%;object-fit:contain;border-radius:14px;background:var(--soft)}
+.fach-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:9px}
+.fach{min-height:105px;padding:10px;background:#fff;border:1px solid var(--border);border-radius:14px;text-align:left}
+.fach.selected{outline:3px solid #0E1627}.fach .swatch{height:38px;border-radius:9px;margin:6px 0;background:#eee}
+.progress{height:9px;background:var(--soft);border-radius:99px;overflow:hidden}.progress>i{display:block;height:100%;background:var(--text);width:0}
+dialog{border:0;border-radius:18px;max-width:650px;width:calc(100% - 28px);box-shadow:0 20px 60px rgba(0,0,0,.2)}
+dialog::backdrop{background:rgba(14,22,39,.35)}
+@media(max-width:650px){.app{padding:10px}header{align-items:flex-start}.grid{grid-template-columns:1fr}th:nth-child(n+6),td:nth-child(n+6){display:none}}
+</style>
+</head>
+<body>
+<div class="app">
+<header>
+  <div><h1>Perlen-Manager</h1><div class="sub">Offline · lokal · ohne KI-Pflicht</div></div>
+  <button class="btn" id="backupBtn">JSON-Backup</button>
+</header>
+<nav id="nav">
+  <button data-tab="dashboard" class="active">Übersicht</button>
+  <button data-tab="scan">Foto analysieren</button>
+  <button data-tab="inventory">Bestand</button>
+  <button data-tab="boxes">Boxen</button>
+  <button data-tab="compare">Vergleich</button>
+  <button data-tab="data">Daten</button>
+</nav>
+
+<main>
+<section id="dashboard" class="active-section">
+  <div class="grid" id="kpis"></div>
+  <div class="card"><h2>Offene Aufgaben</h2><div id="tasks"></div></div>
+  <div class="card"><h2>Farben im Bestand</h2><div id="colors"></div></div>
+</section>
+
+<section id="scan">
+  <div class="card">
+    <h2>Foto auswählen</h2>
+    <p class="sub">Originalfoto bleibt unverändert. Die lokale Analyse erzeugt keine erfundenen Messwerte.</p>
+    <div class="row">
+      <label class="btn">Vorhandenes Foto auswählen
+        <input id="photo" type="file" accept="image/*" capture="environment" hidden>
+      </label>
+      <button class="btn" id="newScanBtn">Neuen Scan beginnen</button>
+    </div>
+    <img id="preview" class="preview hidden" alt="Originalfoto">
+    <div id="photoInfo" class="sub"></div>
+  </div>
+  <div class="card">
+    <h2>Box-Aufteilung</h2>
+    <div class="grid">
+      <label>Anzahl Fächer
+        <input class="field" id="compartmentCount" type="number" min="1" max="256" value="12">
+      </label>
+      <label>Box
+        <select class="field" id="scanBox"></select>
+      </label>
+    </div>
+    <p class="small muted">Die automatische Erkennung einer beliebigen Box-Geometrie ist in dieser eigenständigen HTML-Basis nicht vorgetäuscht. Fächerzahl und Zuordnung können sicher manuell festgelegt werden.</p>
+    <button class="btn" id="makeCompartments">Fächer erzeugen</button>
+  </div>
+  <div class="card">
+    <div class="row between"><h2>Fächer</h2><span id="selectedCount" class="pill">0 ausgewählt</span></div>
+    <div id="compartments" class="fach-grid"></div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn" id="selectAll">Alle</button><button class="btn" id="selectNone">Keine</button><button class="btn" id="selectInvert">Umkehren</button>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Eigenschaften für Auswahl</h2>
+    <div class="grid" id="bulkFields"></div>
+    <button class="btn" id="applyBulk">Auf Auswahl anwenden</button>
+  </div>
+  <div class="card">
+    <h2>Analyse</h2>
+    <div class="progress"><i id="prog"></i></div>
+    <p id="analysisStatus" class="sub">Noch keine Analyse gestartet.</p>
+    <button class="btn" id="analyzeBtn">Ausgewählte Fächer analysieren</button>
+    <button class="btn" id="saveScanBtn">Analysierte Fächer speichern</button>
+  </div>
+</section>
+
+<section id="inventory">
+  <div class="card">
+    <div class="row between"><h2>Bestand</h2><span id="inventoryCount" class="pill"></span></div>
+    <div class="grid">
+      <input class="field" id="search" placeholder="ID, Farbe, Farbgruppe, Farbname, Farbcode, Box, Fach ...">
+      <select class="field" id="statusFilter"><option value="">Alle Status</option><option>Unsicher</option><option>Analysiert</option><option>Manuell korrigiert</option><option>Geprüft</option><option>Gespeichert</option></select>
+    </div>
+    <div style="overflow:auto;margin-top:12px"><table><thead><tr><th>ID</th><th>Farbe</th><th>Farbgruppe</th><th>Farbname</th><th>Farbcode</th><th>Standort</th><th>Status</th></tr></thead><tbody id="inventoryBody"></tbody></table></div>
+  </div>
+</section>
+
+<section id="boxes">
+  <div class="card">
+    <h2>Boxen</h2>
+    <div class="grid">
+      <label>Neue Box
+        <input class="field" id="boxName" placeholder="z. B. Box Perlen 01">
+      </label>
+      <label>Fächer
+        <input class="field" id="boxCount" type="number" min="1" max="256" value="12">
+      </label>
+    </div>
+    <button class="btn" id="addBox">Box erstellen</button>
+  </div>
+  <div class="card"><div id="boxList"></div></div>
+</section>
+
+<section id="compare">
+  <div class="card">
+    <h2>Farbvergleich</h2>
+    <p class="sub">Vergleicht gespeicherte Farbfingerprints lokal. Unsicherheit wird nicht als Identität behandelt.</p>
+    <div id="compareList"></div>
+  </div>
+</section>
+
+<section id="data">
+  <div class="card">
+    <h2>Daten & Backup</h2>
+    <div class="row">
+      <button class="btn" id="exportJson">JSON exportieren</button>
+      <button class="btn" id="exportCsv">CSV exportieren</button>
+      <label class="btn">JSON wiederherstellen<input id="importJson" type="file" accept="application/json" hidden></label>
+      <button class="btn" id="clearData">Gesamten lokalen Bestand löschen</button>
+    </div>
+    <p class="small muted">Restore überschreibt den lokalen Bestand erst nach Bestätigung. IDs werden aus dem Backup übernommen.</p>
+  </div>
+</section>
+</main>
+</div>
+
+<dialog id="detailDialog">
+  <div style="padding:18px"><div class="row between"><h2>Bestandsdetails</h2><button class="btn" onclick="detailDialog.close()">Schließen</button></div><div id="detailContent"></div></div>
+</dialog>
+
+<script>
+"use strict";
+
+/*
+  Perlen-Manager – eigenständige Offline-Basis.
+  Persistenz: IndexedDB.
+  Die Farbanalyse ist bewusst konservativ: Nur Pixel aus der ermittelten Fachfläche
+  werden gemessen; ohne robuste lokale Segmentierung werden keine erfundenen Farbcodes erzeugt.
+*/
+
+const DB_NAME="perlen-manager-db", DB_VERSION=1;
+let db;
+const state={scan:null, image:null, compartments:[], selected:new Set(), undo:[], redo:[]};
+
+const ATTRS={
+ size:["","1mm","2mm","3mm","4mm","5mm","6mm","7mm","8mm","1cm"],
+ surface:["","glänzend","glatt","facettiert","matt","satin"],
+ effect:["","crackle","opak","marmoriert","inneneinzug","silbereinzug","perlmut","transparent","irisierend","metallic","lustre"],
+ form:["","rund","rocailles","bicone","rondell"],
+ material:["","plastik","glas","kristallglas"],
+ transparency:["","transparent","opak","transluzent","kristallklar"]
+};
+
+function id(n,prefix){return prefix+"-"+String(n).padStart(5,"0")}
+function now(){return new Date().toISOString()}
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function uidKey(){return crypto.randomUUID?crypto.randomUUID():String(Date.now()+Math.random())}
+
+async function initDB(){
+  db=await new Promise((resolve,reject)=>{
+    const r=indexedDB.open(DB_NAME,DB_VERSION);
+    r.onupgradeneeded=()=>{const d=r.result;
+      ["beads","scans","boxes","meta"].forEach(s=>{if(!d.objectStoreNames.contains(s))d.createObjectStore(s,{keyPath:"key"})});
+    };
+    r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);
+  });
+  const meta=await getAll("meta");
+  if(!meta.find(x=>x.key==="counters")) await put("meta",{key:"counters",bead:0,scan:0,box:0});
+}
+function tx(store,mode="readonly"){return db.transaction(store,mode).objectStore(store)}
+function getAll(store){return new Promise((res,rej)=>{const r=tx(store).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+function put(store,obj){return new Promise((res,rej)=>{const r=tx(store,"readwrite").put(obj);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+function clearStore(store){return new Promise((res,rej)=>{const r=tx(store,"readwrite").clear();r.onsuccess=()=>res();r.onerror=()=>rej(r.error)})}
+async function counters(){return (await getAll("meta")).find(x=>x.key==="counters")}
+async function next(prefix){
+  const c=await counters(); const key=prefix==="ID"? "bead":prefix==="SCAN"?"scan":"box";
+  c[key]++; await put("meta",c); return id(c[key],prefix);
+}
+async function allBeads(){return getAll("beads")}
+async function allBoxes(){return getAll("boxes")}
+
+function switchTab(name){
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("active",b.dataset.tab===name));
+  document.querySelectorAll("main section").forEach(s=>s.classList.toggle("active-section",s.id===name));
+  if(name==="dashboard")renderDashboard(); if(name==="inventory")renderInventory();
+  if(name==="boxes")renderBoxes(); if(name==="compare")renderCompare();
+}
+document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>switchTab(b.dataset.tab));
+
+async function renderDashboard(){
+  const [beads,boxes]=await Promise.all([allBeads(),allBoxes()]);
+  const scans=await getAll("scans");
+  const uncertain=beads.filter(b=>b.status==="Unsicher").length;
+  const open=beads.filter(b=>b.status!=="Gespeichert").length;
+  const colors=new Map(); beads.forEach(b=>{const k=b.colorName||"Unbekannt";colors.set(k,(colors.get(k)||0)+1)});
+  kpis.innerHTML=[
+    ["Bestände",beads.length],["Boxen",boxes.length],["Fächer",boxes.reduce((n,b)=>n+b.compartmentCount,0)],
+    ["Scans",scans.length],["Unsicher",uncertain],["Offen",open]
+  ].map(([a,v])=>`<div class="card"><div class="muted">${a}</div><div class="kpi">${v}</div></div>`).join("");
+  tasks.innerHTML=open?`<p>${open} Einträge benötigen noch eine Prüfung oder Speicherung.</p>`:"<p class='ok'>Keine offenen Einträge.</p>";
+  colors.innerHTML=colors.size?[...colors].sort((a,b)=>b[1]-a[1]).map(([c,n])=>`<span class="pill" style="margin:3px">${esc(c)} · ${n}</span>`).join(" "):"<span class='muted'>Noch keine Farbdaten.</span>";
+}
+
+function buildBulkFields(){
+  bulkFields.innerHTML=Object.entries(ATTRS).map(([key,vals])=>`<label>${esc(key)}<select class="field" data-attr="${key}">${vals.map(v=>`<option value="${esc(v)}">${esc(v||"Nicht ändern")}</option>`).join("")}</select></label>`).join("");
+}
+function getBoxOptions(){
+  return allBoxes().then(boxes=>scanBox.innerHTML=boxes.map(b=>`<option value="${b.key}">${esc(b.name)} (${b.key})</option>`).join("")||"<option value=''>Keine Box vorhanden</option>");
+}
+photo.onchange=()=>{
+  const f=photo.files[0]; if(!f)return;
+  const url=URL.createObjectURL(f); preview.src=url; preview.classList.remove("hidden");
+  photoInfo.textContent=`${f.name} · ${Math.round(f.size/1024)} KB`;
+  state.image={file:f,url};
+};
+newScanBtn.onclick=async()=>{state.scan={key:await next("SCAN"),createdAt:now(),originalFile:null};state.compartments=[];state.selected.clear();renderCompartments();analysisStatus.textContent="Neuer Scan bereit.";prog.style.width="0%";};
+makeCompartments.onclick=()=>{
+  const n=Math.max(1,Math.min(256,+compartmentCount.value||1));
+  state.compartments=Array.from({length:n},(_,i)=>({number:i+1,selected:false,status:"Neu",color:null,attrs:{}}));
+  state.selected.clear();renderCompartments();
+};
+function renderCompartments(){
+  compartments.innerHTML=state.compartments.map((c,i)=>`<button class="fach ${state.selected.has(i)?"selected":""}" data-i="${i}">
+    <strong>Fach ${c.number}</strong><div class="swatch" style="background:${esc(c.hex||"#eee")}"></div>
+    <span class="small">${esc(c.colorName||"Noch nicht analysiert")}</span>
+    <div class="small muted">${esc(c.status)}</div></button>`).join("");
+  compartments.querySelectorAll(".fach").forEach(b=>b.onclick=()=>{const i=+b.dataset.i;state.selected.has(i)?state.selected.delete(i):state.selected.add(i);renderCompartments()});
+  selectedCount.textContent=`${state.selected.size} ausgewählt`;
+}
+selectAll.onclick=()=>{state.compartments.forEach((_,i)=>state.selected.add(i));renderCompartments()};
+selectNone.onclick=()=>{state.selected.clear();renderCompartments()};
+selectInvert.onclick=()=>{state.compartments.forEach((_,i)=>state.selected.has(i)?state.selected.delete(i):state.selected.add(i));renderCompartments()};
+
+applyBulk.onclick=()=>{
+  const changes={}; document.querySelectorAll("[data-attr]").forEach(s=>{if(s.value)changes[s.dataset.attr]=s.value});
+  state.selected.forEach(i=>{state.compartments[i].attrs={...state.compartments[i].attrs,...changes};state.compartments[i].status="Manuell korrigiert"});
+  renderCompartments();
+};
+
+async function analyzePixelColor(file){
+  // Konservative lokale Messung: zentrale Bildregion als Rohmessung.
+  // Keine Behauptung einer vollständigen automatischen Fach-/Lochsegmentierung.
+  const img=await new Promise((res,rej)=>{const im=new Image();im.onload=()=>res(im);im.onerror=rej;im.src=URL.createObjectURL(file)});
+  const max=900, scale=Math.min(1,max/img.width,max/img.height);
+  const w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale));
+  const can=document.createElement("canvas");can.width=w;can.height=h;const ctx=can.getContext("2d",{willReadFrequently:true});
+  ctx.drawImage(img,0,0,w,h); const d=ctx.getImageData(Math.floor(w*.2),Math.floor(h*.2),Math.max(1,Math.floor(w*.6)),Math.max(1,Math.floor(h*.6))).data;
+  let rs=[],gs=[],bs=[];
+  for(let i=0;i<d.length;i+=4){if(d[i+3]<200)continue;rs.push(d[i]);gs.push(d[i+1]);bs.push(d[i+2])}
+  if(!rs.length)throw Error("Keine analysierbaren Pixel.");
+  const med=a=>a.sort((x,y)=>x-y)[Math.floor(a.length/2)];
+  const r=med(rs),g=med(gs),b=med(bs),hex="#"+[r,g,b].map(x=>x.toString(16).padStart(2,"0")).join("");
+  return {r,g,b,hex,confidence:0.2,warning:"Rohmessung: Fach-, Perlen- und Lochmaske müssen vor einer endgültigen Farbbewertung geprüft werden."};
+}
+analyzeBtn.onclick=async()=>{
+  if(!state.image?.file){analysisStatus.textContent="Bitte zuerst ein Foto auswählen.";return}
+  if(!state.selected.size){analysisStatus.textContent="Bitte mindestens ein Fach auswählen.";return}
+  prog.style.width="5%"; analysisStatus.textContent="Lokale Messung läuft …";
+  try{
+    const c=await analyzePixelColor(state.image.file);
+    let done=0;
+    state.selected.forEach(i=>{state.compartments[i]={...state.compartments[i],hex:c.hex,rgb:{r:c.r,g:c.g,b:c.b},confidence:c.confidence,warning:c.warning,status:"Unsicher"};done++});
+    prog.style.width="100%";analysisStatus.textContent=`${done} Fach/Fächer gemessen. Wegen fehlender sicherer Fach-/Lochsegmentierung als unsicher markiert.`;renderCompartments();
+  }catch(e){analysisStatus.textContent="Analysefehler: "+e.message;prog.style.width="0%"}
+};
+
+saveScanBtn.onclick=async()=>{
+  if(!state.compartments.length){analysisStatus.textContent="Keine Fächer vorhanden.";return}
+  const box=scanBox.value; if(!box){analysisStatus.textContent="Bitte zuerst eine Box erstellen.";return}
+  const saved=[];
+  for(const c of state.compartments){
+    if(c.status==="Neu")continue;
+    const beadId=await next("ID");
+    const b={
+      key:beadId,id:beadId,scanId:state.scan?.key||await next("SCAN"),
+      createdAt:now(),updatedAt:now(),originalBox:box,originalCompartment:c.number,currentBox:box,currentCompartment:c.number,
+      color:c.color||null,colorGroup:null,colorName:null,colorCode:null,hex:c.hex||null,rgb:c.rgb||null,
+      oklab:null,cielab:null,deltaE00:null,fingerprint:null,confidence:c.confidence??null,
+      reflectionPercentage:null,brightness:null,chroma:null,saturation:null,distribution:null,
+      ...c.attrs,status:c.status,warning:c.warning||null,manualChanges:[],history:[]
+    };
+    await put("beads",b);saved.push(b);
+  }
+  await put("scans",{key:state.scan?.key||await next("SCAN"),createdAt:now(),compartments:state.compartments,box});
+  analysisStatus.textContent=`${saved.length} Bestand/Bestände gespeichert.`;
+  renderCompartments();renderDashboard();
+};
+
+async function renderInventory(){
+  const beads=await allBeads(), q=search.value.toLowerCase(), st=statusFilter.value;
+  const arr=beads.filter(b=>(!q||JSON.stringify(b).toLowerCase().includes(q))&&(!st||b.status===st));
+  inventoryCount.textContent=`${arr.length} / ${beads.length}`;
+  inventoryBody.innerHTML=arr.map(b=>`<tr onclick="showDetail('${esc(b.id)}')"><td><strong>${esc(b.id)}</strong><div class=small>${esc(b.scanId)}</div></td><td>${esc(b.color||"—")} ${b.hex?`<span class=pill>${esc(b.hex)}</span>`:""}</td><td>${esc(b.colorGroup||"—")}</td><td>${esc(b.colorName||"—")}</td><td>${esc(b.colorCode||"—")}</td><td>${esc(b.currentBox||"—")} · Fach ${esc(b.currentCompartment||"—")}</td><td><span class=pill>${esc(b.status)}</span></td></tr>`).join("")||`<tr><td colspan=7 class=muted>Keine Einträge.</td></tr>`;
+}
+search.oninput=renderInventory;statusFilter.onchange=renderInventory;
+
+async function renderBoxes(){
+  const boxes=await allBoxes();
+  boxList.innerHTML=boxes.map(b=>`<div class="card" style="margin:8px 0"><div class="row between"><strong>${esc(b.name)}</strong><span class=pill>${esc(b.key)}</span></div><div>${b.compartmentCount} Fächer</div><button class="btn danger" onclick="deleteBox('${esc(b.key)}')">Box löschen</button></div>`).join("")||"<p class='muted'>Noch keine Box.</p>";
+  await getBoxOptions();
+}
+addBox.onclick=async()=>{
+  const name=boxName.value.trim()||"Box", n=Math.max(1,Math.min(256,+boxCount.value||1)), key=await next("BOX");
+  await put("boxes",{key,name,compartmentCount:n,createdAt:now()});boxName.value="";await renderBoxes();renderDashboard();
+};
+window.deleteBox=async key=>{
+  const beads=await allBeads(), used=beads.some(b=>b.currentBox===key||b.originalBox===key);
+  if(used){alert("Diese Box wird von Beständen verwendet und kann nicht gelöscht werden, ohne zuerst die Standorte zu ändern.");return}
+  if(confirm("Box wirklich löschen?")){const r=tx("boxes","readwrite").delete(key);r.onsuccess=renderBoxes}
+};
+
+function rgbToLab({r,g,b}){
+  let [R,G,B]=[r,g,b].map(v=>v/255).map(v=>v<=.04045?v/12.92:Math.pow((v+.055)/1.055,2.4));
+  const x=(R*.4124+G*.3576+B*.1805)/.95047,y=(R*.2126+G*.7152+B*.0722),z=(R*.0193+G*.1192+B*.9505)/1.08883;
+  const f=v=>v>.008856?Math.cbrt(v):(7.787*v+16/116);
+  const [fx,fy,fz]=[f(x),f(y),f(z)];return {L:116*fy-16,a:500*(fx-fy),b:200*(fy-fz)}
+}
+function deltaE(a,b){
+  if(!a||!b)return null;
+  // Kompakte CIE76-Näherung als konservativer technischer Hilfswert.
+  return Math.sqrt((a.L-b.L)**2+(a.a-b.a)**2+(a.b-b.b)**2);
+}
+async function renderCompare(){
+  const beads=await allBeads(); const withLab=beads.filter(b=>b.rgb);
+  compareList.innerHTML=withLab.length<2?"Mindestens zwei gespeicherte Farbmessungen werden benötigt.":withLab.map(a=>{
+    const la=a.cielab||rgbToLab(a.rgb), others=withLab.filter(x=>x.id!==a.id).map(x=>({x,d:deltaE(la,x.cielab||rgbToLab(x.rgb))})).sort((p,q)=>p.d-q.d).slice(0,3);
+    return `<div class=card style="margin:8px 0"><strong>${esc(a.id)}</strong> · ${esc(a.hex||"")}<div class=small>${others.map(o=>`${esc(o.x.id)}: ΔE76 ${o.d.toFixed(2)}`).join(" · ")}</div></div>`
+  }).join("");
+}
+
+window.showDetail=async id=>{
+  const b=(await allBeads()).find(x=>x.id===id);if(!b)return;
+  detailContent.innerHTML=`<dl>${Object.entries(b).filter(([k])=>!["history","manualChanges"].includes(k)).map(([k,v])=>`<dt><strong>${esc(k)}</strong></dt><dd>${esc(typeof v==="object"?JSON.stringify(v):v??"—")}</dd>`).join("")}</dl>`;
+  detailDialog.showModal();
+};
+
+function download(name,type,text){
+  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+async function exportData(){const [beads,boxes,scans,meta]=await Promise.all([getAll("beads"),getAll("boxes"),getAll("scans"),getAll("meta")]);return {version:1,exportedAt:now(),beads,boxes,scans,meta}}
+exportJson.onclick=async()=>download("perlen-backup.json","application/json",JSON.stringify(await exportData(),null,2));
+backupBtn.onclick=()=>exportJson.click();
+exportCsv.onclick=async()=>{
+  const beads=await allBeads(), keys=["id","scanId","color","colorGroup","colorName","colorCode","hex","size","surface","effect","form","material","transparency","quantity","originalBox","originalCompartment","currentBox","currentCompartment","status","confidence","createdAt","updatedAt"];
+  const q=v=>`"${String(v??"").replaceAll('"','""')}"`;download("perlen-bestand.csv","text/csv;charset=utf-8","\ufeff"+keys.map(q).join(";")+"\n"+beads.map(b=>keys.map(k=>q(b[k])).join(";")).join("\n"));
+};
+importJson.onchange=async()=>{
+  const f=importJson.files[0];if(!f)return;
+  try{const d=JSON.parse(await f.text());if(!d||!Array.isArray(d.beads)||!Array.isArray(d.boxes))throw Error("Ungültiges Backup.");
+    if(!confirm(`Backup importieren? ${d.beads.length} Bestände und ${d.boxes.length} Boxen werden lokal ersetzt.`))return;
+    await Promise.all(["beads","boxes","scans","meta"].map(clearStore));
+    for(const x of d.beads)await put("beads",x);for(const x of d.boxes)await put("boxes",x);for(const x of (d.scans||[]))await put("scans",x);for(const x of (d.meta||[]))await put("meta",x);
+    await initDB();alert("Backup wiederhergestellt.");location.reload();
+  }catch(e){alert("Import fehlgeschlagen: "+e.message)}
+};
+clearData.onclick=async()=>{if(!confirm("Wirklich ALLE lokalen Daten löschen? Diese Aktion kann nur mit einem Backup rückgängig gemacht werden."))return;for(const s of ["beads","boxes","scans","meta"])await clearStore(s);await initDB();location.reload()};
+
+(async()=>{
+  await initDB();buildBulkFields();await renderBoxes();renderDashboard();renderCompartments();
+})();
+</script>
+<noscript>
+<div style="padding:24px;font-family:system-ui,sans-serif;background:#FBEDE9;color:#0E1627">
+<strong>JavaScript ist erforderlich.</strong><br>
+Bitte öffne diese Datei in einem aktuellen Browser und aktiviere JavaScript.
+</div>
+</noscript>
+</body>
+</html>
