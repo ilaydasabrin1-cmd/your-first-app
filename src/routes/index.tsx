@@ -81,7 +81,7 @@ function App() {
         <main className="grid gap-3">
           {tab === "dashboard" && <Dashboard beads={beads} boxes={boxes} scans={scans} />}
           {tab === "scan" && <Scan boxes={boxes} reload={reload} goBoxes={() => setTab("boxes")} />}
-          {tab === "inventory" && <Inventory beads={beads} />}
+          {tab === "inventory" && <Inventory beads={beads} reload={reload} />}
           {tab === "boxes" && <Boxes boxes={boxes} beads={beads} reload={reload} />}
           {tab === "compare" && <Compare beads={beads} />}
           {tab === "data" && <Data beads={beads} exportJson={exportJson} reload={reload} />}
@@ -136,7 +136,7 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
   const [prog, setProg] = useState(0);
   const [status, setStatus] = useState("Noch keine Analyse gestartet.");
 
-  useEffect(() => { if (!box && boxes[0]) setBox(boxes[0].key); }, [boxes, box]);
+  
   useEffect(() => () => { if (image) URL.revokeObjectURL(image.url); }, [image]);
 
   const toggle = (i: number) => setSel((s) => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n; });
