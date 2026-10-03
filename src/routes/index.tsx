@@ -345,12 +345,25 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
   const checkDupes = () => {
     const list = beads.filter((b) => sel.has(b.key) && b.rgb);
     const lab = new Map(list.map((b) => [b.key, rgbToLab(b.rgb)]));
-    const found: { a: Rec; b: Rec; dE: number }[] = [];
+    const found: { a: Rec; b: Rec; dE: number; attrs: string[] }[] = [];
     for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
       const a = list[i], b = list[j];
       if (a.scanId && b.scanId && a.scanId === b.scanId) continue;
+      // Farb-Übereinstimmung ...
       const dE = deltaE(lab.get(a.key)!, lab.get(b.key)!);
-      if (dE <= 8) found.push({ a, b, dE });
+      if (dE > 8) continue;
+      // ... plus Eigenschaften: gesetzt u. verschieden = kein Duplikat;
+      // Eigenschaften, die nur bei einer Perle gesetzt sind, werden als offen gemeldet.
+      const shared: string[] = [], open: string[] = [];
+      let conflict = false;
+      for (const k of Object.keys(ATTRS)) {
+        const av = a.attrs?.[k] || "", bv = b.attrs?.[k] || "";
+        if (av && bv && av !== bv) { conflict = true; break; }
+        if (av && bv) shared.push(`${ATTR_LABEL[k]}: ${av}`);
+        else if (av || bv) open.push(`${ATTR_LABEL[k]}: ${av || bv} (nur ${av ? a.id : b.id})`);
+      }
+      if (conflict) continue;
+      found.push({ a, b, dE, attrs: [...shared, ...open] });
     }
     found.sort((x, y) => x.dE - y.dE);
     setDupes(found);
