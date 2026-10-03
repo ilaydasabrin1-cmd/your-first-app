@@ -494,6 +494,194 @@ function Boxes({ boxes, beads, reload }: { boxes: Rec[]; beads: Rec[]; reload: (
   );
 }
 
+// Farbfamilie aus RGB bestimmen (für Sortierung nach Farbe)
+function colorFamily(rgb: { r: number; g: number; b: number } | null | undefined): string {
+  if (!rgb) return "Ohne Farbe";
+  const r = rgb.r / 255, g = rgb.g / 255, b = rgb.b / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const l = (max + min) / 2, d = max - min;
+  if (d < 0.08) return l > 0.8 ? "Weiß" : l < 0.2 ? "Schwarz" : "Grau";
+  const s = d / (1 - Math.abs(2 * l - 1) || 1);
+  if (s < 0.15) return l > 0.75 ? "Weiß" : l < 0.25 ? "Schwarz" : "Grau";
+  let h = 0;
+  if (max === r) h = ((g - b) / d) % 6;
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  h = (h * 60 + 360) % 360;
+  if (h < 15 || h >= 345) return "Rot";
+  if (h < 40) return "Orange";
+  if (h < 70) return "Gelb";
+  if (h < 160) return "Grün";
+  if (h < 200) return "Türkis";
+  if (h < 255) return "Blau";
+  if (h < 290) return "Lila";
+  if (h < 345) return "Rosa";
+  return "Rot";
+}
+const COLOR_ORDER = ["Rot", "Orange", "Gelb", "Grün", "Türkis", "Blau", "Lila", "Rosa", "Braun", "Weiß", "Grau", "Schwarz", "Ohne Farbe"];
+
+const SORT_CRITERIA: Record<string, string> = {
+  color: "Farbe", surface: "Oberfläche", size: "Größe", effect: "Effekt", form: "Form", material: "Material", transparency: "Transparenz",
+};
+
+type SortGroup = { label: string; beads: Rec[] };
+type SortPlan = { boxKey: string; boxName: string; slots: { comp: number; group: SortGroup }[]; overflow: SortGroup[] };
+
+function Sort({ beads, boxes, reload }: { beads: Rec[]; boxes: Rec[]; reload: () => Promise<void> }) {
+  const [criteria, setCriteria] = useState<string[]>(["color"]);
+  const [boxSel, setBoxSel] = useState<Set<string>>(new Set());
+  const [onlyUnsorted, setOnlyUnsorted] = useState(false);
+  const [plan, setPlan] = useState<SortPlan[] | null>(null);
+
+  const toggleCrit = (k: string) =>
+    setCriteria((cs) => (cs.includes(k) ? cs.filter((c) => c !== k) : [...cs, k]));
+  const moveCrit = (k: string, dir: -1 | 1) =>
+    setCriteria((cs) => {
+      const i = cs.indexOf(k), j = i + dir;
+      if (i < 0 || j < 0 || j >= cs.length) return cs;
+      const n = [...cs];[n[i], n[j]] = [n[j]!, n[i]!]; return n;
+    });
+
+  const keyOf = (b: Rec) =>
+    criteria.map((c) => (c === "color" ? colorFamily(b.rgb) : String(b[c] || "ohne " + SORT_CRITERIA[c]))).join(" · ");
+
+  const groupRank = (label: string) => {
+    const fam = label.split(" · ")[0]!;
+    const i = COLOR_ORDER.indexOf(fam);
+    return i < 0 ? COLOR_ORDER.length : i;
+  };
+
+  const buildPlan = () => {
+    if (!criteria.length) return alert("Bitte mindestens ein Sortierkriterium wählen.");
+    const targetBoxes = boxes.filter((b) => !boxSel.size || boxSel.has(b.key));
+    if (!targetBoxes.length) return alert("Bitte mindestens eine Box anlegen bzw. auswählen.");
+    const pool = beads.filter((b) => !onlyUnsorted || !b.currentBox);
+    if (!pool.length) return alert("Keine Perlen zum Sortieren gefunden.");
+    const map = new Map<string, Rec[]>();
+    for (const b of pool) {
+      const k = keyOf(b);
+      map.set(k, [...(map.get(k) || []), b]);
+    }
+    const groups: SortGroup[] = [...map.entries()]
+      .map(([label, bs]) => ({ label, beads: bs }))
+      .sort((a, b) => groupRank(a.label) - groupRank(b.label) || a.label.localeCompare(b.label, "de"));
+    const plans: SortPlan[] = [];
+    let gi = 0;
+    for (const box of targetBoxes) {
+      const slots: SortPlan["slots"] = [];
+      const cap = Math.max(1, box.compartmentCount || 1);
+      for (let comp = 1; comp <= cap && gi < groups.length; comp++, gi++)
+        slots.push({ comp, group: groups[gi]! });
+      plans.push({ boxKey: box.key, boxName: box.name, slots, overflow: [] });
+    }
+    if (gi < groups.length) plans[plans.length - 1]!.overflow = groups.slice(gi);
+    setPlan(plans);
+  };
+
+  const applyPlan = async () => {
+    if (!plan) return;
+    const total = plan.reduce((n, p) => n + p.slots.length, 0);
+    if (!confirm(`Sortierung übernehmen? ${total} Gruppe(n) werden den Boxen zugewiesen und die Standorte der Perlen aktualisiert.`)) return;
+    let moved = 0;
+    for (const p of plan)
+      for (const s of p.slots)
+        for (const b of s.group.beads) {
+          await put("beads", { ...b, currentBox: p.boxKey, currentCompartment: s.comp, updatedAt: now() });
+          moved++;
+        }
+    await reload();
+    alert(`${moved} Perle(n) wurden zugeordnet.`);
+  };
+
+  return (
+    <>
+      <div className="pm-card grid gap-3">
+        <h2 className="text-xl font-semibold">Sortierkriterien</h2>
+        <p className="text-muted-foreground">
+          Wähle, wonach gruppiert wird – die Reihenfolge entscheidet: z. B. „Farbe + Oberfläche" legt alle roten glänzenden Perlen gemeinsam in ein Fach.
+          So kannst du deine Boxen zuhause nach demselben Schema einsortieren.
+        </p>
+        <div className="grid gap-2">
+          {Object.entries(SORT_CRITERIA).map(([k, label]) => {
+            const pos = criteria.indexOf(k);
+            return (
+              <div key={k} className="flex items-center gap-2">
+                <label className="flex flex-1 items-center gap-2">
+                  <input type="checkbox" checked={pos >= 0} onChange={() => toggleCrit(k)} />
+                  <span>{label}</span>
+                  {pos >= 0 && <span className="pm-pill">{pos + 1}.</span>}
+                </label>
+                {pos >= 0 && (
+                  <span className="flex gap-1">
+                    <button className="pm-btn" onClick={() => moveCrit(k, -1)} aria-label="Nach oben">↑</button>
+                    <button className="pm-btn" onClick={() => moveCrit(k, 1)} aria-label="Nach unten">↓</button>
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={onlyUnsorted} onChange={(e) => setOnlyUnsorted(e.target.checked)} />
+          Nur Perlen ohne Box einsortieren
+        </label>
+      </div>
+
+      <div className="pm-card grid gap-3">
+        <h2 className="text-xl font-semibold">Ziel-Boxen</h2>
+        <p className="text-muted-foreground">Keine Auswahl = alle Boxen werden der Reihe nach befüllt.</p>
+        <div className="flex flex-wrap gap-2">
+          {boxes.map((b) => (
+            <label key={b.key} className="pm-pill flex cursor-pointer items-center gap-1.5">
+              <input type="checkbox" checked={boxSel.has(b.key)} onChange={() =>
+                setBoxSel((s) => { const n = new Set(s); n.has(b.key) ? n.delete(b.key) : n.add(b.key); return n; })} />
+              {b.name} ({b.compartmentCount} Fächer)
+            </label>
+          ))}
+          {!boxes.length && <p className="text-muted-foreground">Noch keine Boxen – lege sie im Tab „Boxen" an.</p>}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button className="pm-btn-primary" onClick={buildPlan}>Sortierplan erstellen</button>
+          {plan && <button className="pm-btn" onClick={applyPlan}>Sortierung übernehmen (Standorte speichern)</button>}
+        </div>
+      </div>
+
+      {plan && (
+        <div className="grid gap-3">
+          {plan.map((p) => (
+            <div key={p.boxKey} className="pm-card grid gap-2">
+              <div className="flex items-center justify-between">
+                <strong>{p.boxName}</strong>
+                <span className="pm-pill">{p.slots.length} Fach/Fächer belegt</span>
+              </div>
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-2">
+                {p.slots.map((s) => (
+                  <div key={s.comp} className="rounded-xl border bg-card p-2.5 text-sm">
+                    <strong>Fach {s.comp}</strong>
+                    <div className="my-1 flex flex-wrap gap-1">
+                      {s.group.beads.slice(0, 8).map((b) => (
+                        <span key={b.key} className="inline-block size-4 rounded-full border" style={{ background: b.hex || "#ccc" }} title={b.id} />
+                      ))}
+                    </div>
+                    <div>{s.group.label}</div>
+                    <div className="text-xs text-muted-foreground">{s.group.beads.length} Perle(n)</div>
+                  </div>
+                ))}
+                {!p.slots.length && <p className="text-muted-foreground">Bleibt leer.</p>}
+              </div>
+              {p.overflow.length > 0 && (
+                <p className="text-sm text-destructive">
+                  {p.overflow.length} Gruppe(n) passen nicht mehr in die Boxen: {p.overflow.map((g) => `${g.label} (${g.beads.length})`).join(", ")}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 function Compare({ beads }: { beads: Rec[] }) {
   const withLab = beads.filter((b) => b.rgb);
   return (
