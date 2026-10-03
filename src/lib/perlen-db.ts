@@ -5,7 +5,7 @@ export const STORES = ["beads", "scans", "boxes", "meta"] as const;
 export type StoreName = (typeof STORES)[number];
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export type Rec = { key: string; [k: string]: any };
+export type Rec = any;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
 
