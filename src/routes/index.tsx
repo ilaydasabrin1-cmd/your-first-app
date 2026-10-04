@@ -393,7 +393,7 @@ function Scan({ boxes, scans, reload, goBoxes }: { boxes: Rec[]; scans: Rec[]; r
   );
 }
 
-function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void> }) {
+function Inventory({ beads, boxes, reload }: { beads: Rec[]; boxes: Rec[]; reload: () => Promise<void> }) {
   const [q, setQ] = useState("");
   const [st, setSt] = useState("");
   const [detail, setDetail] = useState<Rec | null>(null);
@@ -401,7 +401,46 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
   const [dupes, setDupes] = useState<{ a: Rec; b: Rec; dE: number; attrs: string[] }[] | null>(null);
   const dlg = useRef<HTMLDialogElement>(null);
   useEffect(() => { if (detail) dlg.current?.showModal(); }, [detail]);
-  const arr = beads.filter((b) => (!q || JSON.stringify(b).toLowerCase().includes(q.toLowerCase())) && (!st || b.status === st));
+  const [f, setF] = useState<Record<string, string>>({});
+  const [bulk, setBulk] = useState<Record<string, string>>({});
+  const [msg, setMsg] = useState("");
+  const boxName = (k: string | null) => (k ? boxes.find((x) => x.key === k)?.name || k : "Ohne Box");
+  const FILTERS: [string, string, string[]][] = [
+    ["colorGroup", "Farbgruppe", [...new Set(beads.map((b) => b.colorGroup).filter(Boolean))]],
+    ...Object.entries(ATTRS).map(([k, v]) => [k, ATTR_LABEL[k]!, [...v.filter(Boolean), "__none"]] as [string, string, string[]]),
+    ["currentBox", "Aktuelle Box", ["__none", ...boxes.map((b) => b.key)]],
+    ["originalBox", "Ursprüngliche Box", ["__none", ...boxes.map((b) => b.key)]],
+  ];
+  const num = (k: string) => (f[k] === undefined || f[k] === "" ? null : +f[k]!);
+  const arr = beads.filter((b) => {
+    if (q && !JSON.stringify(b).toLowerCase().includes(q.toLowerCase())) return false;
+    if (st && b.status !== st) return false;
+    for (const [k] of FILTERS) {
+      const v = f[k]; if (!v) continue;
+      if (v === "__none" ? b[k] : b[k] !== v) return false;
+    }
+    if (num("curComp") !== null && b.currentCompartment !== num("curComp")) return false;
+    if (num("origComp") !== null && b.originalCompartment !== num("origComp")) return false;
+    if (num("confMin") !== null && (b.confidence ?? -1) * 100 < num("confMin")!) return false;
+    if (num("brMin") !== null && (b.brightness ?? -1) < num("brMin")!) return false;
+    if (num("brMax") !== null && (b.brightness ?? 999) > num("brMax")!) return false;
+    return true;
+  });
+  const applyBulk = async () => {
+    const ch = Object.fromEntries(Object.entries(bulk).filter(([, v]) => v));
+    if (!sel.size) return setMsg("Bitte zuerst Perlen auswählen.");
+    if (!Object.keys(ch).length) return setMsg("Bitte mindestens eine Eigenschaft oder einen Standort wählen.");
+    const { box: nb, comp: nc, ...attrs } = ch;
+    for (const b of beads.filter((x) => sel.has(x.key))) {
+      const changes = Object.entries(attrs).filter(([k, v]) => b[k] !== v).map(([k, v]) => ({ field: k, from: b[k] ?? null, to: v, at: now() }));
+      const rec: Rec = { ...b, ...attrs, updatedAt: now(), manualChanges: [...(b.manualChanges || []), ...changes] };
+      if (nb !== undefined) { rec.currentBox = nb === "__none" ? null : nb; rec.currentCompartment = nc ? +nc : rec.currentCompartment; }
+      else if (nc) rec.currentCompartment = +nc;
+      if (changes.length) rec.status = "Manuell korrigiert";
+      await put("beads", rec);
+    }
+    await reload(); setMsg(`${sel.size} Perle(n) aktualisiert. Auswahl bleibt bestehen; andere Eigenschaften unverändert.`);
+  };
   const allSel = arr.length > 0 && arr.every((b) => sel.has(b.key));
   const toggleAll = () => setSel(allSel ? new Set() : new Set(arr.map((b) => b.key)));
   const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
@@ -430,6 +469,9 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
     }
     found.sort((x, y) => x.dE - y.dE);
     setDupes(found);
+    const vk = "VAL-" + Date.now();
+    put("validations", { key: vk, type: "duplicate-check", method: "ΔE76≤8 + Eigenschaften", createdAt: now(), checked: list.map((b) => b.id),
+      matches: found.map((m) => ({ a: m.a.id, b: m.b.id, deltaE76: +m.dE.toFixed(2), attrs: m.attrs })) });
   };
   return (
     <div className="pm-card grid gap-3">
@@ -438,13 +480,60 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
         <input className="pm-field" value={q} onChange={(e) => setQ(e.target.value)} placeholder="ID, Farbe, Farbgruppe, Farbname, Farbcode, Box, Fach ..." />
         <select className="pm-field" value={st} onChange={(e) => setSt(e.target.value)}>
           <option value="">Alle Status</option>
-          {["Unsicher", "Analysiert", "Manuell korrigiert", "Geprüft", "Gespeichert"].map((s) => <option key={s}>{s}</option>)}
+          {["Unsicher", "Analysiert", "Nicht erkannt", "Manuell korrigiert", "Geprüft"].map((s) => <option key={s}>{s}</option>)}
         </select>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <button className="pm-btn" onClick={toggleAll}>{allSel ? "Auswahl aufheben" : "Alle auswählen"}</button>
+      <details className="rounded-xl bg-secondary/50 p-3">
+        <summary className="cursor-pointer font-semibold">Filter {Object.values(f).filter(Boolean).length ? `(${Object.values(f).filter(Boolean).length} aktiv)` : ""}</summary>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {FILTERS.map(([k, label, opts]) => (
+            <label key={k} className="pm-label">{label}
+              <select className="pm-field" value={f[k] || ""} onChange={(e) => setF({ ...f, [k]: e.target.value })}>
+                <option value="">Alle</option>
+                {opts.map((o) => <option key={o} value={o}>{o === "__none" ? "nicht gesetzt" : k.endsWith("Box") ? boxName(o) : o}</option>)}
+              </select>
+            </label>
+          ))}
+          {([["curComp", "Aktuelles Fach"], ["origComp", "Ursprüngliches Fach"], ["confMin", "Sicherheit ab (%)"], ["brMin", "Helligkeit ab (L 0–100)"], ["brMax", "Helligkeit bis (L 0–100)"]] as const).map(([k, l]) => (
+            <label key={k} className="pm-label">{l}<input className="pm-field" type="number" inputMode="numeric" value={f[k] || ""} onChange={(e) => setF({ ...f, [k]: e.target.value })} /></label>
+          ))}
+        </div>
+        <button className="pm-btn mt-3" onClick={() => setF({})}>Filter zurücksetzen</button>
+      </details>
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-card py-2">
+        <span className="pm-pill text-sm font-semibold">{sel.size} ausgewählt</span>
+        <button className="pm-btn" onClick={() => setSel(new Set([...sel, ...arr.map((b) => b.key)]))}>Gefilterte auswählen</button>
+        <button className="pm-btn" onClick={() => setSel(new Set())}>Keine</button>
+        <button className="pm-btn" onClick={() => setSel(new Set(arr.filter((b) => !sel.has(b.key)).map((b) => b.key)))}>Umkehren</button>
         <button className="pm-btn-primary" disabled={sel.size < 2} onClick={checkDupes}>Duplikate prüfen ({sel.size} ausgewählt)</button>
       </div>
+      {sel.size > 0 && (
+        <div className="grid gap-3 rounded-xl bg-secondary p-3">
+          <h3 className="font-semibold">Auswahl bearbeiten ({sel.size})</h3>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {Object.entries(ATTRS).map(([k, vals]) => (
+              <label key={k} className="pm-label">{ATTR_LABEL[k]}
+                <select className="pm-field" value={bulk[k] || ""} onChange={(e) => setBulk({ ...bulk, [k]: e.target.value })}>
+                  {vals.map((v) => <option key={v} value={v}>{v || "Nicht ändern"}</option>)}
+                </select>
+              </label>
+            ))}
+            <label className="pm-label">Aktuelle Box
+              <select className="pm-field" value={bulk.box || ""} onChange={(e) => setBulk({ ...bulk, box: e.target.value })}>
+                <option value="">Nicht ändern</option><option value="__none">Ohne Box</option>
+                {boxes.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
+              </select>
+            </label>
+            <label className="pm-label">Aktuelles Fach<input className="pm-field" type="number" min={1} value={bulk.comp || ""} placeholder="Nicht ändern" onChange={(e) => setBulk({ ...bulk, comp: e.target.value })} /></label>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button className="pm-btn-primary" onClick={applyBulk}>Auf {sel.size} ausgewählte anwenden</button>
+            <button className="pm-btn" onClick={() => setBulk({})}>Felder leeren</button>
+          </div>
+          <p className="text-xs text-muted-foreground">Der Originalstandort bleibt immer unverändert.</p>
+        </div>
+      )}
+      {msg && <p className="text-sm">{msg}</p>}
       {dupes !== null && (
         <div className="grid gap-2 rounded-xl bg-secondary p-3">
           <div className="flex items-center justify-between">
@@ -468,9 +557,26 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
           ))}
         </div>
       )}
-      <div className="overflow-x-auto">
+      <div className="grid gap-2 sm:hidden">
+        {arr.map((b) => (
+          <div key={b.key} className={`flex items-center gap-3 rounded-xl border p-3 ${sel.has(b.key) ? "outline-2 outline-primary" : ""}`}>
+            <input type="checkbox" className="size-6" checked={sel.has(b.key)} onChange={() => toggle(b.key)} aria-label={`Perle ${b.id} auswählen`} />
+            <button className="flex flex-1 items-center gap-3 text-left" onClick={() => setDetail(b)}>
+              <span className="inline-block size-9 shrink-0 rounded-full border" style={{ background: b.hex || "transparent" }} />
+              <span className="grid text-sm">
+                <strong>{b.id} <span className="font-normal text-muted-foreground">{b.scanId}</span></strong>
+                <span>{b.colorGroup || "—"} · {b.hex || "—"} · {b.confidence != null ? Math.round(b.confidence * 100) + " %" : "—"}</span>
+                <span className="text-xs text-muted-foreground">{[b.size, b.surface, b.effect, b.shape, b.material, b.transparency].filter(Boolean).join(" · ") || "keine Eigenschaften"}</span>
+                <span className="text-xs text-muted-foreground">Jetzt: {boxName(b.currentBox)} F{b.currentCompartment ?? "–"} · Original: {boxName(b.originalBox)} F{b.originalCompartment ?? "–"}</span>
+              </span>
+            </button>
+          </div>
+        ))}
+        {!arr.length && <p className="text-muted-foreground">Keine Einträge.</p>}
+      </div>
+      <div className="hidden overflow-x-auto sm:block">
         <table className="w-full border-collapse text-sm">
-          <thead><tr className="text-left">{["", "ID", "Farbe", "Farbgruppe", "Farbname", "Farbcode", "Standort", "Status"].map((h, i) => <th key={i} className="border-b p-2.5">{i === 0 ? <input type="checkbox" checked={allSel} onChange={toggleAll} aria-label="Alle auswählen" /> : h}</th>)}</tr></thead>
+          <thead><tr className="text-left">{["", "ID", "Farbe", "Farbgruppe", "Farbname", "Farbcode", "Größe", "Oberfläche", "Effekt", "Form", "Material", "Transparenz", "Sicherheit", "Aktuell", "Original", "Status"].map((h, i) => <th key={i} className="border-b p-2.5">{i === 0 ? <input type="checkbox" checked={allSel} onChange={toggleAll} aria-label="Alle auswählen" /> : h}</th>)}</tr></thead>
           <tbody>
             {arr.map((b) => (
               <tr key={b.key} onClick={() => setDetail(b)} className="cursor-pointer hover:bg-muted">
@@ -483,11 +589,14 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
                 <td className="border-b p-2.5">{b.colorGroup || "—"}</td>
                 <td className="border-b p-2.5">{b.colorName || "—"}</td>
                 <td className="border-b p-2.5">{b.colorCode || "—"}</td>
-                <td className="border-b p-2.5">{b.currentBox || "—"} · Fach {b.currentCompartment || "—"}</td>
+                {["size", "surface", "effect", "shape", "material", "transparency"].map((k) => <td key={k} className="border-b p-2.5">{b[k] || "—"}</td>)}
+                <td className="border-b p-2.5">{b.confidence != null ? Math.round(b.confidence * 100) + " %" : "—"}</td>
+                <td className="border-b p-2.5">{boxName(b.currentBox)} · F{b.currentCompartment ?? "—"}</td>
+                <td className="border-b p-2.5">{boxName(b.originalBox)} · F{b.originalCompartment ?? "—"}</td>
                 <td className="border-b p-2.5"><span className="pm-pill">{b.status}</span></td>
               </tr>
             ))}
-            {!arr.length && <tr><td colSpan={8} className="p-2.5 text-muted-foreground">Keine Einträge.</td></tr>}
+            {!arr.length && <tr><td colSpan={16} className="p-2.5 text-muted-foreground">Keine Einträge.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -506,7 +615,9 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
               ))}
             </div>
             <div><button className="pm-btn-primary" onClick={async () => {
-              const rec = { ...detail, status: "Manuell korrigiert", updatedAt: now() };
+              const orig = beads.find((x) => x.key === detail.key) || {};
+              const changes = Object.keys(ATTRS).filter((k) => (orig[k] ?? null) !== (detail[k] ?? null)).map((k) => ({ field: k, from: orig[k] ?? null, to: detail[k] ?? null, at: now() }));
+              const rec = { ...detail, status: changes.length ? "Manuell korrigiert" : detail.status, updatedAt: now(), manualChanges: [...(detail.manualChanges || []), ...changes] };
               await put("beads", rec); setDetail(rec); await reload(); dlg.current?.close();
             }}>Eigenschaften speichern</button></div>
           </div>
@@ -789,7 +900,7 @@ function Compare({ beads }: { beads: Rec[] }) {
 
 function Data({ beads, exportJson, reload }: { beads: Rec[]; exportJson: () => void; reload: () => Promise<void> }) {
   const exportCsv = () => {
-    const keys = ["id", "scanId", "color", "colorGroup", "colorName", "colorCode", "hex", "size", "surface", "effect", "form", "material", "transparency", "quantity", "originalBox", "originalCompartment", "currentBox", "currentCompartment", "status", "confidence", "createdAt", "updatedAt"];
+    const keys = ["id", "scanId", "color", "colorGroup", "colorName", "colorCode", "hex", "size", "surface", "effect", "shape", "material", "transparency", "originalBox", "originalCompartment", "currentBox", "currentCompartment", "status", "confidence", "brightness", "chroma", "hue", "warning", "createdAt", "updatedAt"];
     const q = (v: unknown) => `"${String(v ?? "").replaceAll('"', '""')}"`;
     download("perlen-bestand.csv", "text/csv;charset=utf-8", "\ufeff" + keys.map(q).join(";") + "\n" + beads.map((b) => keys.map((k) => q(b[k])).join(";")).join("\n"));
   };
