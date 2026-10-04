@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  analyzeGrid, type Pt, clearStore, del, deltaE, download, getAll, initDB, nextId, now, put, rgbToLab, STORES, type Rec,
+  analyzeGrid, type Pt, type CellResult, clearStore, colorFamily, colorMetrics, del, deltaE, download, getAll, initDB, nextId, now, put,
+  rgbToLab, STORES, syncCounters, type Rec,
 } from "@/lib/perlen-db";
 
 export const Route = createFileRoute("/")({
@@ -19,15 +20,15 @@ export const Route = createFileRoute("/")({
 });
 
 const ATTRS: Record<string, string[]> = {
-  size: ["", "1mm", "2mm", "3mm", "4mm", "5mm", "6mm", "7mm", "8mm", "1cm"],
+  size: ["", "2 mm", "3 mm", "4 mm", "5 mm", "6 mm", "7 mm", "8 mm", "1 cm", "unbekannt"],
   surface: ["", "glänzend", "glatt", "facettiert", "matt", "satin"],
   effect: ["", "crackle", "opak", "marmoriert", "inneneinzug", "silbereinzug", "perlmut", "transparent", "irisierend", "metallic", "lustre"],
-  form: ["", "rund", "rocailles", "bicone", "rondell"],
+  shape: ["", "rund", "rocailles", "bicone", "rondell"],
   material: ["", "plastik", "glas", "kristallglas"],
   transparency: ["", "transparent", "opak", "transluzent", "kristallklar"],
 };
 const ATTR_LABEL: Record<string, string> = {
-  size: "Größe", surface: "Oberfläche", effect: "Effekt", form: "Form", material: "Material", transparency: "Transparenz",
+  size: "Größe", surface: "Oberfläche", effect: "Effekt", shape: "Form", material: "Material", transparency: "Transparenz",
 };
 
 const TABS = [
@@ -39,6 +40,7 @@ type Tab = (typeof TABS)[number][0];
 type Comp = {
   number: number; status: string; color: string | null; attrs: Record<string, string>;
   hex?: string; rgb?: { r: number; g: number; b: number }; confidence?: number; warning?: string; colorName?: string; saved?: boolean;
+  masks?: CellResult["masks"];
 };
 
 function App() {
@@ -50,16 +52,19 @@ function App() {
 
   const reload = useCallback(async () => {
     const [b, x, s] = await Promise.all([getAll("beads"), getAll("boxes"), getAll("scans")]);
-    setBeads(b); setBoxes(x); setScans(s);
+    setBeads(b.map((x) => ({ ...(x.attrs || {}), ...x, shape: x.shape ?? x.attrs?.shape ?? x.form ?? x.attrs?.form ?? null })));
+    setBoxes(x); setScans(s);
   }, []);
 
   useEffect(() => {
-    initDB().then(reload).then(() => setReady(true));
+    initDB().then(syncCounters).then(reload).then(() => setReady(true));
   }, [reload]);
 
   const exportJson = async () => {
-    const [b, x, s, m] = await Promise.all(STORES.map((st) => getAll(st)));
-    download("perlen-backup.json", "application/json", JSON.stringify({ version: 1, exportedAt: now(), beads: b, boxes: x, scans: s, meta: m }, null, 2));
+    const [b, x, s, m, v] = await Promise.all(STORES.map((st) => getAll(st)));
+    // Fotos (Binärdaten) werden nicht ins JSON geschrieben, nur ihre Metadaten.
+    const scansOut = s!.map(({ photo, ...rest }) => ({ ...rest, photoStored: !!photo }));
+    download("perlen-backup.json", "application/json", JSON.stringify({ version: 2, exportedAt: now(), beads: b, boxes: x, scans: scansOut, meta: m, validations: v }, null, 2));
   };
 
   return (
@@ -80,8 +85,8 @@ function App() {
       {!ready ? <p className="text-muted-foreground">Lade lokale Daten …</p> : (
         <main className="grid gap-3">
           {tab === "dashboard" && <Dashboard beads={beads} boxes={boxes} scans={scans} />}
-          {tab === "scan" && <Scan boxes={boxes} reload={reload} goBoxes={() => setTab("boxes")} />}
-          {tab === "inventory" && <Inventory beads={beads} reload={reload} />}
+          {tab === "scan" && <Scan boxes={boxes} scans={scans} reload={reload} goBoxes={() => setTab("boxes")} />}
+          {tab === "inventory" && <Inventory beads={beads} boxes={boxes} reload={reload} />}
           {tab === "boxes" && <Boxes boxes={boxes} beads={beads} reload={reload} />}
           {tab === "sort" && <Sort beads={beads} boxes={boxes} reload={reload} />}
           {tab === "compare" && <Compare beads={beads} />}
@@ -95,9 +100,9 @@ function App() {
 function Dashboard({ beads, boxes, scans }: { beads: Rec[]; boxes: Rec[]; scans: Rec[] }) {
   const open = beads.filter((b) => b.status !== "Gespeichert").length;
   const colors = new Map<string, number>();
-  beads.forEach((b) => { const k = b.colorName || "Unbekannt"; colors.set(k, (colors.get(k) || 0) + 1); });
+  beads.forEach((b) => { const k = b.colorGroup || "Nicht bestimmt"; colors.set(k, (colors.get(k) || 0) + 1); });
   const kpis: [string, number][] = [
-    ["Bestände", beads.length], ["Boxen", boxes.length],
+    ["Perlen", beads.length], ["Boxen", boxes.length],
     ["Fächer", boxes.reduce((n, b) => n + (b.compartmentCount || 0), 0)],
     ["Scans", scans.length], ["Unsicher", beads.filter((b) => b.status === "Unsicher").length], ["Offen", open],
   ];
@@ -113,7 +118,22 @@ function Dashboard({ beads, boxes, scans }: { beads: Rec[]; boxes: Rec[]; scans:
         {open ? <p>{open} Einträge benötigen noch eine Prüfung oder Speicherung.</p> : <p className="text-success">Keine offenen Einträge.</p>}
       </div>
       <div className="pm-card">
-        <h2 className="mb-2 text-xl font-semibold">Farben im Bestand</h2>
+        <h2 className="mb-2 text-xl font-semibold">Zuletzt hinzugefügt</h2>
+        {beads.length ? <div className="grid gap-1.5">
+          {[...beads].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 8).map((b) => (
+            <div key={b.key} className="flex items-center gap-2 text-sm">
+              <span className="inline-block size-5 rounded-full border" style={{ background: b.hex || "transparent" }} />
+              <strong>{b.id}</strong><span className="text-muted-foreground">{b.scanId} · {b.colorGroup || "—"} · Sicherheit {b.confidence != null ? Math.round(b.confidence * 100) + " %" : "—"}</span>
+            </div>))}
+        </div> : <span className="text-muted-foreground">Noch keine Perlen gespeichert.</span>}
+      </div>
+      <div className="pm-card">
+        <h2 className="mb-2 text-xl font-semibold">Analysequalität</h2>
+        {beads.length ? <p>{beads.filter((b) => (b.confidence ?? 0) >= 0.6).length} sicher · {beads.filter((b) => b.confidence != null && b.confidence < 0.6).length} unsicher · {beads.filter((b) => b.confidence == null).length} ohne Messung</p>
+          : <span className="text-muted-foreground">Noch keine Messungen.</span>}
+      </div>
+      <div className="pm-card">
+        <h2 className="mb-2 text-xl font-semibold">Farbgruppen im Bestand</h2>
         {colors.size ? (
           <div className="flex flex-wrap gap-1.5">
             {[...colors].sort((a, b) => b[1] - a[1]).map(([c, n]) => <span key={c} className="pm-pill">{c} · {n}</span>)}
@@ -124,7 +144,7 @@ function Dashboard({ beads, boxes, scans }: { beads: Rec[]; boxes: Rec[]; scans:
   );
 }
 
-function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<void>; goBoxes: () => void }) {
+function Scan({ boxes, scans, reload, goBoxes }: { boxes: Rec[]; scans: Rec[]; reload: () => Promise<void>; goBoxes: () => void }) {
   const [image, setImage] = useState<{ file: File; url: string } | null>(null);
   const [scanKey, setScanKey] = useState<string | null>(null);
   const [rows, setRows] = useState(4);
@@ -156,8 +176,13 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
     setProg(10); setStatus("Lokale Messung läuft …");
     try {
       const res = await analyzeGrid(image.file, corners, R, C);
-      setComps(base.map((x, i) => idx.has(i)
-        ? { ...x, hex: res[i]!.hex, rgb: { r: res[i]!.r, g: res[i]!.g, b: res[i]!.b }, confidence: res[i]!.confidence, warning: res[i]!.warning ?? "", status: "Unsicher" } : x));
+      setComps(base.map((x, i) => {
+        if (!idx.has(i)) return x;
+        const m = res[i]!;
+        if (!m.hex) return { ...x, hex: undefined, rgb: undefined, confidence: 0, warning: m.warning ?? "", masks: m.masks, status: "Nicht erkannt" };
+        return { ...x, hex: m.hex, rgb: { r: m.r, g: m.g, b: m.b }, confidence: m.confidence, warning: m.warning ?? "", masks: m.masks,
+          status: m.confidence >= 0.6 ? "Analysiert" : "Unsicher" };
+      }));
       setProg(100);
       setStatus(`${idx.size} Fach/Fächer gemessen. Bitte Farben prüfen und dann speichern.`);
     } catch (e) { setStatus("Analysefehler: " + (e as Error).message); setProg(0); }
@@ -179,26 +204,54 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
     const sk = scanKey || (await nextId("SCAN"));
     setScanKey(sk);
     const b = box || null;
+    if (!scans.some((x) => x.key === sk)) await put("scans", {
+      key: sk, createdAt: now(), box: b, layout: { rows: R, cols: C }, corners,
+      photo: image?.file ?? null, photoName: image?.file.name ?? null, photoType: image?.file.type ?? null, photoSize: image?.file.size ?? null,
+      analysis: { method: "geometric-v1", note: "Bead-/Hole-/Analysis-Mask je Fach; Originalfoto unverändert." },
+    });
     let saved = 0;
     for (const c of comps) {
-      if (!c.hex || c.saved) continue;
+      if (!c.hex || !c.rgb || c.saved) continue;
       const id = await nextId("ID");
+      const m = colorMetrics(c.rgb!);
+      const grp = colorFamily(c.rgb);
       await put("beads", {
         key: id, id, scanId: sk, createdAt: now(), updatedAt: now(),
         originalBox: b, originalCompartment: c.number, currentBox: b, currentCompartment: c.number,
-        color: c.color || null, colorGroup: null, colorName: null, colorCode: null, hex: c.hex || null, rgb: c.rgb || null,
-        oklab: null, cielab: null, deltaE00: null, fingerprint: null, confidence: c.confidence ?? null,
-        reflectionPercentage: null, brightness: null, chroma: null, saturation: null, distribution: null,
+        // 1. Farbe, 2. Farbgruppe (vorläufig, automatisch), 3. Farbname, dann Farbcode (System noch offen) und technische Werte
+        color: grp, colorGroup: grp, colorGroupSource: "auto-hue-v1", colorName: null, colorCode: null,
+        hex: m.hex, rgb: m.rgb, hsl: m.hsl, cielab: m.cielab, oklab: m.oklab, hue: m.hue, chroma: m.chroma, brightness: m.brightness,
+        saturation: m.hsl.s, distribution: null, dominantRegions: null, fingerprint: null, deltaE00: null,
+        confidence: c.confidence ?? null, analysisQuality: (c.confidence ?? 0) >= 0.6 ? "ok" : "unsicher",
+        masks: c.masks ? { beadMask: c.masks.beadPixels, holeMask: c.masks.holePixels, reflectionMask: c.masks.reflectionPixels, analysisMask: c.masks.analysisPixels, sampled: c.masks.sampled, method: c.masks.method } : null,
+        reflectionPercentage: c.masks ? +(c.masks.reflectionPixels / c.masks.sampled * 100).toFixed(1) : null,
+        size: null, surface: null, effect: null, shape: null, material: null, transparency: null,
         ...c.attrs, status: c.status, warning: c.warning || null, manualChanges: [], history: [],
       });
       saved++;
     }
     setComps((cs) => cs.map((c) => (c.hex ? { ...c, saved: true } : c)));
-    await put("scans", { key: sk, createdAt: now(), compartments: comps, box: b });
+    const prev = (await getAll("scans")).find((x) => x.key === sk) || { key: sk, createdAt: now() };
+    await put("scans", { ...prev, updatedAt: now(), compartments: comps.map(({ saved: _s, ...c }) => c) });
     setStatus(`${saved} Perle(n) gespeichert. Eigenschaften kannst du später im Bestand zuweisen.`);
     reload();
   };
 
+  const pick = (f: File) => {
+    setImage({ file: f, url: URL.createObjectURL(f) }); setCorners(DEFAULT_CORNERS);
+    setScanKey(null); setComps([]); setSel(new Set()); setProg(0);
+    setStatus("Ziehe die 4 Ecken des Rasters auf die Ecken der Box.");
+  };
+  const deleteLastScan = async () => {
+    const last = [...scans].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)))[0];
+    if (!last) return alert("Es gibt noch keinen gespeicherten Scan.");
+    const own = (await getAll("beads")).filter((x) => x.scanId === last.key);
+    if (!confirm(`Scan ${last.key} vom ${new Date(last.createdAt).toLocaleString("de-DE")} löschen?\n\nDabei werden die ${own.length} Perle(n) gelöscht, die aus diesem Scan stammen. Ältere Scans und alle anderen Perlen bleiben unverändert.`)) return;
+    for (const x of own) await del("beads", x.key);
+    await del("scans", last.key);
+    if (scanKey === last.key) { setScanKey(null); setComps((cs) => cs.map((c) => ({ ...c, saved: false }))); }
+    await reload(); setStatus(`Scan ${last.key} gelöscht.`);
+  };
   const DEFAULT_CORNERS: Pt[] = [{ x: 0.12, y: 0.12 }, { x: 0.88, y: 0.12 }, { x: 0.88, y: 0.88 }, { x: 0.12, y: 0.88 }];
   const frameRef = useRef<HTMLDivElement>(null);
   const dragIdx = useRef<number | null>(null);
@@ -217,16 +270,20 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
         <h2 className="text-xl font-semibold">Foto auswählen</h2>
         <p className="text-muted-foreground">Originalfoto bleibt unverändert. Die lokale Analyse erzeugt keine erfundenen Messwerte.</p>
         <div className="flex flex-wrap gap-2">
-          <label className="pm-btn-primary">Vorhandenes Foto auswählen
-            <input type="file" accept="image/*" hidden onChange={(e) => {
-              const f = e.target.files?.[0]; if (f) { setImage({ file: f, url: URL.createObjectURL(f) }); setCorners(DEFAULT_CORNERS); }
-            }} />
+          <label className="pm-btn">Vorhandenes Foto auswählen
+            <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ""; }} />
           </label>
-          <button className="pm-btn" onClick={async () => {
-            setScanKey(await nextId("SCAN")); setComps([]); setSel(new Set()); setProg(0); setCorners(DEFAULT_CORNERS);
-            setStatus(image ? "Neuer Scan bereit. Ziehe die 4 Ecken des Rasters auf die Ecken der Box." : "Neuer Scan bereit. Bitte zuerst ein Foto auswählen.");
-          }}>Neuen Scan beginnen</button>
+          <label className="pm-btn">Foto aufnehmen
+            <input type="file" accept="image/*" capture="environment" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(f); e.target.value = ""; }} />
+          </label>
+          <button className="pm-btn" onClick={() => {
+            if (comps.some((c) => c.hex && !c.saved) && !confirm("Ungespeicherte Analyse verwerfen? Gespeicherte Perlen bleiben erhalten.")) return;
+            setImage(null); setScanKey(null); setComps([]); setSel(new Set()); setProg(0); setCorners([]);
+            setStatus("Neues Foto: Bitte ein Foto auswählen. Gespeicherte Perlen bleiben erhalten.");
+          }}>Neues Foto</button>
+          <button className="pm-btn text-destructive" onClick={deleteLastScan}>Letzten Scan löschen</button>
         </div>
+        {!image && <div className="rounded-xl bg-secondary p-6 text-center text-muted-foreground">Noch kein Foto ausgewählt.</div>}
         {image && <>
           <p className="text-sm font-medium">Ziehe die 4 Eckpunkte auf die Ecken der Box – das Raster passt sich an.</p>
           <div ref={frameRef} className="relative mx-auto w-fit touch-none select-none"
@@ -281,15 +338,17 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
 
 
       <div className="pm-card grid gap-3">
-        <div className="flex items-center justify-between"><h2 className="text-xl font-semibold">Fächer</h2><span className="pm-pill">{sel.size} ausgewählt</span></div>
+        <div className="sticky top-0 z-10 flex items-center justify-between bg-card"><h2 className="text-xl font-semibold">Fächer</h2><span className="pm-pill">{sel.size} ausgewählt</span></div>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(110px,1fr))] gap-2">
           {comps.map((c, i) => (
             <button key={i} onClick={() => toggle(i)}
               className={`min-h-26 rounded-xl border bg-card p-2.5 text-left ${sel.has(i) ? "outline-3 outline-primary" : ""}`}>
               <strong>Fach {c.number}</strong>
               <div className="my-1.5 h-9 rounded-lg bg-muted" style={c.hex ? { background: c.hex } : undefined} />
-              <span className="text-xs">{c.colorName || (c.hex ?? "Noch nicht analysiert")}</span>
-              <div className="text-xs text-muted-foreground">{c.status}</div>
+              <span className="text-xs">{c.hex ? `${colorFamily(c.rgb)} · ${c.hex}` : c.status === "Nicht erkannt" ? "Nicht erkannt" : "Noch nicht analysiert"}</span>
+              <div className="text-xs text-muted-foreground">{c.status}{c.confidence != null && c.hex ? ` · ${Math.round(c.confidence * 100)} %` : ""}{c.saved ? " · gespeichert" : ""}</div>
+              {c.masks && <div className="text-[10px] text-muted-foreground">Loch {Math.round(c.masks.holePixels / c.masks.sampled * 100)} % ausgeschlossen</div>}
+              {c.warning && <div className="text-[10px] text-destructive">{c.warning}</div>}
             </button>
           ))}
           {!comps.length && <p className="text-muted-foreground">Noch keine Fächer erzeugt.</p>}
@@ -314,8 +373,11 @@ function Scan({ boxes, reload, goBoxes }: { boxes: Rec[]; reload: () => Promise<
         </div>
         <div><button className="pm-btn" onClick={() => {
           const ch = Object.fromEntries(Object.entries(bulk).filter(([, v]) => v));
-          setComps((cs) => cs.map((c, i) => sel.has(i) ? { ...c, attrs: { ...c.attrs, ...ch }, status: "Manuell korrigiert" } : c));
-        }}>Auf Auswahl anwenden</button></div>
+          if (!sel.size) return setStatus("Bitte zuerst Fächer auswählen.");
+          setComps((cs) => cs.map((c, i) => sel.has(i) ? { ...c, attrs: { ...c.attrs, ...ch } } : c));
+          setStatus(`${Object.keys(ch).length} Eigenschaft(en) auf ${sel.size} Fächer angewendet. Auswahl bleibt bestehen.`);
+        }}>Auf {sel.size} ausgewählte anwenden</button></div>
+        <p className="text-xs text-muted-foreground">Nur gewählte Felder werden geändert, andere Eigenschaften bleiben erhalten. Bereits gespeicherte Perlen bearbeitest du im Bestand.</p>
       </div>
 
       <div className="pm-card grid gap-3">
@@ -358,7 +420,7 @@ function Inventory({ beads, reload }: { beads: Rec[]; reload: () => Promise<void
       const shared: string[] = [], open: string[] = [];
       let conflict = false;
       for (const k of Object.keys(ATTRS)) {
-        const av = a.attrs?.[k] || "", bv = b.attrs?.[k] || "";
+        const av = a[k] || "", bv = b[k] || "";
         if (av && bv && av !== bv) { conflict = true; break; }
         if (av && bv) shared.push(`${ATTR_LABEL[k]}: ${av}`);
         else if (av || bv) open.push(`${ATTR_LABEL[k]}: ${av || bv} (nur ${av ? a.id : b.id})`);
@@ -494,34 +556,10 @@ function Boxes({ boxes, beads, reload }: { boxes: Rec[]; beads: Rec[]; reload: (
   );
 }
 
-// Farbfamilie aus RGB bestimmen (für Sortierung nach Farbe)
-function colorFamily(rgb: { r: number; g: number; b: number } | null | undefined): string {
-  if (!rgb) return "Ohne Farbe";
-  const r = rgb.r / 255, g = rgb.g / 255, b = rgb.b / 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  const l = (max + min) / 2, d = max - min;
-  if (d < 0.08) return l > 0.8 ? "Weiß" : l < 0.2 ? "Schwarz" : "Grau";
-  const s = d / (1 - Math.abs(2 * l - 1) || 1);
-  if (s < 0.15) return l > 0.75 ? "Weiß" : l < 0.25 ? "Schwarz" : "Grau";
-  let h = 0;
-  if (max === r) h = ((g - b) / d) % 6;
-  else if (max === g) h = (b - r) / d + 2;
-  else h = (r - g) / d + 4;
-  h = (h * 60 + 360) % 360;
-  if (h < 15 || h >= 345) return "Rot";
-  if (h < 40) return "Orange";
-  if (h < 70) return "Gelb";
-  if (h < 160) return "Grün";
-  if (h < 200) return "Türkis";
-  if (h < 255) return "Blau";
-  if (h < 290) return "Lila";
-  if (h < 345) return "Rosa";
-  return "Rot";
-}
 const COLOR_ORDER = ["Rot", "Orange", "Gelb", "Grün", "Türkis", "Blau", "Lila", "Rosa", "Braun", "Weiß", "Grau", "Schwarz", "Ohne Farbe"];
 
 const SORT_CRITERIA: Record<string, string> = {
-  color: "Farbe", surface: "Oberfläche", size: "Größe", effect: "Effekt", form: "Form", material: "Material", transparency: "Transparenz",
+  color: "Farbe", surface: "Oberfläche", size: "Größe", effect: "Effekt", shape: "Form", material: "Material", transparency: "Transparenz",
 };
 
 type SortGroup = { label: string; beads: Rec[] };
