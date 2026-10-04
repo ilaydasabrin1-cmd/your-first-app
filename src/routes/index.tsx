@@ -39,7 +39,7 @@ type Tab = (typeof TABS)[number][0];
 
 type Comp = {
   number: number; status: string; color: string | null; attrs: Record<string, string>;
-  hex?: string; rgb?: { r: number; g: number; b: number }; confidence?: number; warning?: string; colorName?: string; saved?: boolean;
+  hex?: string | undefined; rgb?: { r: number; g: number; b: number } | undefined; confidence?: number; warning?: string; colorName?: string; saved?: boolean;
   masks?: CellResult["masks"];
 };
 
@@ -519,12 +519,12 @@ function Inventory({ beads, boxes, reload }: { beads: Rec[]; boxes: Rec[]; reloa
               </label>
             ))}
             <label className="pm-label">Aktuelle Box
-              <select className="pm-field" value={bulk.box || ""} onChange={(e) => setBulk({ ...bulk, box: e.target.value })}>
+              <select className="pm-field" value={bulk["box"] || ""} onChange={(e) => setBulk({ ...bulk, box: e.target.value })}>
                 <option value="">Nicht ändern</option><option value="__none">Ohne Box</option>
                 {boxes.map((b) => <option key={b.key} value={b.key}>{b.name}</option>)}
               </select>
             </label>
-            <label className="pm-label">Aktuelles Fach<input className="pm-field" type="number" min={1} value={bulk.comp || ""} placeholder="Nicht ändern" onChange={(e) => setBulk({ ...bulk, comp: e.target.value })} /></label>
+            <label className="pm-label">Aktuelles Fach<input className="pm-field" type="number" min={1} value={bulk["comp"] || ""} placeholder="Nicht ändern" onChange={(e) => setBulk({ ...bulk, comp: e.target.value })} /></label>
           </div>
           <div className="flex flex-wrap gap-2">
             <button className="pm-btn-primary" onClick={applyBulk}>Auf {sel.size} ausgewählte anwenden</button>
