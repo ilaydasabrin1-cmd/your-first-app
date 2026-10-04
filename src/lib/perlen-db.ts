@@ -218,7 +218,8 @@ export async function analyzeGrid(file: Blob, corners: Pt[], rows: number, cols:
       px.push({ r: data[k]!, g: data[k + 1]!, b: data[k + 2]!, d });
     }
     const L = px.map((p) => lum(p.r, p.g, p.b));
-    const ringL = med(L.filter((_, i) => px[i]!.d > 0.14).concat([0]).slice(0, -1).length ? L.filter((_, i) => px[i]!.d > 0.14) : L);
+    const ring = L.filter((_, i) => px[i]!.d > 0.14);
+    const ringL = med(ring.length ? ring : L);
     let hole = 0, refl = 0;
     const use = px.filter((p, i) => {
       const isHole = p.d < 0.1 || L[i]! < ringL * 0.55; // Lochmitte oder deutlich dunkler als Perlenring
